@@ -1,0 +1,302 @@
+You are a staff-level quant systems architect, backend engineer, SRE, DevOps designer, and production-readiness reviewer.
+
+I want you to guide the architecture, planning, and implementation approach for this trading project using strict professional vibe-coding discipline.
+
+This is not a toy bot.
+This is a multi-exchange, AI-assisted trading system that must be designed for safety, maintainability, auditability, deployment clarity, and production realism before implementation begins.
+
+I want you to use the architecture proposal below as source context, challenge it where needed, improve it where needed, and then produce the best execution plan and implementation guidance.
+
+## Core operating rules
+
+You must follow these rules throughout:
+
+1. Treat AI as an accelerator, not as an authority.
+2. No implementation should bypass deterministic risk controls.
+3. Never allow trading logic, webhook handling, or AI output to directly place live trades without passing hard validation and risk gates.
+4. Every service boundary, deployment choice, and infrastructure decision must be justified.
+5. Prefer simple, robust, observable architecture over clever complexity.
+6. Design for greenfield, but avoid lock-in to one exchange or one deployment platform.
+7. The system must support multiple exchange APIs for live trading, with Binance definitely included, and at least one or more of: Bybit, OKX, Kraken, Coinbase, depending on what is most appropriate.
+8. The system must also support TradingView integration safely through webhook ingestion or a similarly safe event path.
+9. Hosting/deployment context:
+   - local development and operator environment will use Podman
+   - self-hosted deployment/orchestration will use Coolify where appropriate
+10. Clearly separate:
+   - what should run locally in Podman for development, testing, and paper trading
+   - what should be deployed/managed in Coolify for persistent hosted operation
+11. Do not over-engineer for HFT if the assumptions do not require it.
+12. Do not assume one exchange’s API behavior applies to all exchanges.
+13. Secrets, API keys, webhook tokens, and exchange credentials must never be hardcoded.
+14. Every live-trading path must have audit logging, replayability, and operator visibility.
+15. If any part of the current proposal is unsafe, fragile, or too complex for phase 1, say so clearly and propose a safer alternative.
+
+## Project context
+
+This is the current architecture proposal draft I want you to review and build on:
+
+[PASTE THE FULL ARCHITECTURE PROPOSAL HERE]
+
+## What I want from you
+
+I want a full architecture and execution review that uses best-practice vibe-coding discipline.
+
+That means:
+- question assumptions before coding,
+- reduce ambiguity,
+- define boundaries before implementation,
+- identify risky areas,
+- sequence work correctly,
+- and define what should be built manually/explicitly versus what can be generated quickly with AI assistance.
+
+## First task: ask discovery questions
+
+Before making recommendations, ask me targeted questions that materially affect architecture.
+
+At minimum, ask about:
+1. Which exchanges must be supported first.
+2. Whether the scope is CEX-only for now or if DEX is planned later.
+3. Whether TradingView is signal-only, confirmation-only, or can originate trade intents.
+4. Whether live trading is required from phase 1 or if paper trading must come first.
+5. Target execution speed / latency tolerance.
+6. Capital range and risk tolerance.
+7. Whether AI is advisory-only or can participate in final trade approval after validation.
+8. What exact role Claude/Anthropic should play in the system.
+9. Whether local embeddings are preferred over API embeddings.
+10. Whether backtesting and simulation are required now, later, or not at all.
+11. What alerting channels are needed.
+12. What local machine specs and hosted server specs are available.
+13. Whether the operator is solo or a team.
+14. Whether there must be a web dashboard now or later.
+15. Which regulatory/jurisdiction constraints matter for operation.
+
+Do not continue until the key ambiguities are surfaced.
+
+## Then work in these phases
+
+# Phase 1: Architecture Reality Check
+Review the proposal critically.
+
+I want you to assess:
+- what is strong,
+- what is weak,
+- what is too ambitious for phase 1,
+- what is missing,
+- what creates operational risk,
+- what creates trading risk,
+- what creates deployment complexity,
+- and what should be simplified.
+
+Specifically evaluate:
+- service decomposition
+- exchange abstraction strategy
+- risk engine separation
+- AI decision-layer placement
+- TradingView integration path
+- RAG usefulness versus premature complexity
+- Redis choice
+- PostgreSQL + TimescaleDB choice
+- Qdrant choice
+- Streamlit vs Next.js
+- Podman + Coolify compatibility assumptions
+- observability stack weight versus value
+
+For each major component, classify it as:
+- keep as proposed
+- simplify
+- defer
+- redesign
+
+# Phase 2: Best-Practice Vibe-Coding Plan
+I want you to explicitly translate the project into a professional vibe-coding workflow.
+
+Define:
+- what must be specified before generating code
+- what modules should be built first
+- what prompts should require planning before implementation
+- what should be reviewed line-by-line
+- what should be blocked from AI-generated “creative” changes
+- which files/services should be considered high-risk and require extra review
+
+Highlight especially:
+- execution engine
+- order routing
+- leverage handling
+- liquidation logic
+- risk engine
+- exchange adapter layer
+- secrets/config handling
+- webhook verification
+- kill switch
+- persistent state and journals
+- reconciliation logic
+
+State clearly where vibe coding is appropriate and where explicit engineering discipline must dominate.
+
+# Phase 3: Multi-Exchange Design
+Design the right abstraction for supporting multiple exchanges.
+
+I want:
+- a recommended first set of exchanges for phase 1
+- why they are best
+- exchange capability matrix
+- how to design adapters so the rest of the system is not tightly coupled to Binance
+- what differences must be normalized and what should remain exchange-specific
+- rate limit strategy
+- order precision / lot size / symbol format handling
+- funding rate handling
+- account/balance sync handling
+- order status reconciliation
+- failover behavior if one exchange is degraded
+
+You must explicitly include Binance.
+You should recommend additional exchanges only if they improve liquidity, coverage, or strategy feasibility.
+
+# Phase 4: TradingView Integration
+Design a safe TradingView integration model.
+
+Clarify:
+- whether TradingView alerts should produce raw trade intents, candidate opportunities, or only supporting signals
+- webhook verification strategy
+- replay protection
+- idempotency
+- rate limiting
+- schema validation
+- symbol normalization
+- strategy authorization
+- how to prevent forged or duplicated alerts
+- whether TradingView should ever be allowed to directly trigger execution
+
+I want you to strongly bias toward safety and controlled ingestion.
+
+# Phase 5: Local Podman vs Coolify Responsibilities
+This is critical.
+
+I want you to clearly split the system into:
+
+## A. What belongs in local Podman
+For example:
+- development services
+- integration testing
+- paper trading sandbox
+- local Qdrant / Postgres / Redis
+- local observability
+- strategy experimentation
+- ingestion testing
+- replay testing
+
+## B. What belongs in Coolify
+For example:
+- persistent hosted API services
+- stable background workers
+- dashboards
+- persistent databases where appropriate
+- operator-facing services
+- remote monitoring
+- webhook receiver endpoints
+- production paper/live trading services if justified
+
+For each service, specify:
+- should it run in local Podman only
+- should it run in both local Podman and Coolify
+- should it run in Coolify only
+- why
+
+Also address:
+- rootless/container compatibility concerns
+- volumes and persistence concerns
+- environment/secret injection
+- networking assumptions
+- whether Coolify should manage everything or only selected long-running services
+- whether any databases should remain external rather than inside Coolify-managed stacks
+
+# Phase 6: Production Reality and Risk Controls
+Review the system from a true production perspective.
+
+Assess:
+- secrets management
+- audit trails
+- trade journal integrity
+- observability
+- alerting
+- kill switch behavior
+- startup/shutdown safety
+- exchange disconnect handling
+- stale market data handling
+- partial fill handling
+- duplicate order prevention
+- clock drift concerns
+- reconciliation jobs
+- crash recovery
+- restart safety
+- backup and restore for operational state
+- operator runbooks
+
+Assume live money is at risk.
+Tell me exactly what is missing for a minimum production-safe baseline.
+
+# Phase 7: Scope Discipline
+I do not want frontend-first drift.
+
+Help me define:
+- what is the true phase 1 MVP
+- what can be paper-only
+- what should be deferred
+- whether RAG belongs in phase 1 or later
+- whether Streamlit is enough
+- whether Next.js should wait
+- whether backtesting should be postponed until core execution and controls are stable
+
+Be blunt about what should NOT be built first.
+
+# Phase 8: Implementation Sequence
+Produce the best execution order.
+
+I want:
+1. Phase-by-phase build order
+2. Dependencies between phases
+3. What must be validated before moving to the next phase
+4. Definition of done for each phase
+5. Which phases can use AI-assisted generation heavily
+6. Which phases require manual implementation and deep review
+7. Testing strategy per phase
+
+Include:
+- local-only validation first
+- paper trading before live trading
+- limited exchange rollout before broader support
+- TradingView integration only after intake validation is complete
+- live deployment only after replay, reconciliation, and kill switch tests pass
+
+# Phase 9: Deliverables
+At the end, provide:
+
+## 1. Executive recommendation
+A concise verdict on the best architecture direction.
+
+## 2. Revised architecture
+A corrected architecture proposal that is safer and more practical than the current one if changes are needed.
+
+## 3. Podman vs Coolify deployment map
+A clear table of each service and where it should live.
+
+## 4. Risk register
+Top technical and operational risks, severity, and mitigation.
+
+## 5. Phase 1 MVP scope
+The leanest safe version of the system.
+
+## 6. Production-readiness checklist
+What must exist before any live capital is used.
+
+## 7. Suggested prompting discipline for implementation
+Rules I should use when asking AI to implement modules in this project.
+
+Important style:
+- Think like a cautious quant architect, not a hype engineer.
+- Optimize for correctness, controllability, and survival.
+- Be explicit about what should be manual, what can be AI-assisted, and what should be deferred.
+- Do not praise complexity for its own sake.
+- If the proposal is too big, cut it down.
+- If a design choice increases hidden risk, flag it immediately.
+- Start by asking me the discovery questions only.

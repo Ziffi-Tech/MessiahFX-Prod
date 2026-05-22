@@ -1,0 +1,26 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY shared/ /tmp/shared/
+RUN pip install --no-cache-dir /tmp/shared && rm -rf /tmp/shared
+
+COPY services/risk/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY services/risk/app/ ./app/
+
+RUN groupadd -r appuser && useradd -r -g appuser appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8003
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -sf http://localhost:8003/health/live || exit 1
+
+# Risk engine: 2 workers for resilience — both check the same Redis halt flag
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8003", "--no-access-log", "--workers", "2"]

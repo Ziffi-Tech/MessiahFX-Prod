@@ -1,0 +1,30 @@
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Shared library (mezna_shared.metrics, etc.) — must be installed before service deps
+COPY shared/ /tmp/shared/
+RUN pip install --no-cache-dir /tmp/shared && rm -rf /tmp/shared
+
+COPY services/rag/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY services/rag/app/ ./app/
+
+RUN groupadd -r appuser && useradd -r -g appuser appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8009
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -sf http://localhost:8009/health/live || exit 1
+
+# 2 workers — embedding + synthesis are I/O bound (external API calls).
+# Book analysis runs up to 3 min per doc; workers handle concurrent queries
+# while one is analysing. Do not exceed 2 — Qdrant connections multiply.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8009", \
+     "--workers", "2", "--no-access-log"]

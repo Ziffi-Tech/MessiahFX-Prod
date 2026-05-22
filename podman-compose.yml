@@ -1,0 +1,597 @@
+name: mezna-quantfx
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MeznaQuantFX AI — Podman Compose (Development + Paper Trading)
+#
+# Usage:
+#   podman-compose up infra          # start DB + Redis only
+#   podman-compose up                # start all services
+#   podman-compose up gateway        # start single service
+#   podman-compose --profile full up # include observability stack
+#
+# First-run order:
+#   1. Copy .env.example → .env and fill credentials
+#   2. podman-compose up -d postgres redis
+#   3. podman-compose run --rm migrate
+#   4. podman-compose up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  mezna-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:        # Reserved — Phase 3 (RAG system)
+  prometheus_data:    # Reserved — Phase 2 (observability)
+  grafana_data:       # Reserved — Phase 2 (observability)
+  loki_data:          # Reserved — Phase 2 (observability)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INFRASTRUCTURE
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: mezna-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mezna}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mezna_dev_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-mezna_trading}
+      TIMESCALEDB_TELEMETRY: "off"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init-timescale.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mezna} -d ${POSTGRES_DB:-mezna_trading}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: mezna-redis
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+    volumes:
+      - redis_data:/data
+      - ./infrastructure/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # MIGRATION RUNNER — runs once at startup, then exits
+  # Run manually: podman-compose run --rm migrate
+  # ─────────────────────────────────────────────────────────────────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: services/migrate/Containerfile
+    container_name: mezna-migrate
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - mezna-net
+    restart: "no"
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # GATEWAY — API gateway, WebSocket hub, TradingView webhook receiver
+  # ─────────────────────────────────────────────────────────────────────────
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Containerfile
+    container_name: mezna-gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: gateway
+      SERVICE_PORT: "8000"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./services/gateway/app:/app/app  # hot-reload in dev
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # MARKET-DATA — normalised tick ingestion (Binance + Oanda)
+  # ─────────────────────────────────────────────────────────────────────────
+  market-data:
+    build:
+      context: .
+      dockerfile: services/market-data/Containerfile
+    container_name: mezna-market-data
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: market-data
+      SERVICE_PORT: "8001"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./services/market-data/app:/app/app
+    ports:
+      - "127.0.0.1:8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8001/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # STRATEGY — funding arb, stat arb, swing signal generation
+  # ─────────────────────────────────────────────────────────────────────────
+  strategy:
+    build:
+      context: .
+      dockerfile: services/strategy/Containerfile
+    container_name: mezna-strategy
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: strategy
+      SERVICE_PORT: "8002"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./services/strategy/app:/app/app
+    ports:
+      - "127.0.0.1:8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8002/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # RISK — hard limits, drawdown, kill switch (SYNCHRONOUS gate)
+  # ─────────────────────────────────────────────────────────────────────────
+  risk:
+    build:
+      context: .
+      dockerfile: services/risk/Containerfile
+    container_name: mezna-risk
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: risk
+      SERVICE_PORT: "8003"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./services/risk/app:/app/app
+    ports:
+      - "127.0.0.1:8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8003/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # EXECUTOR — order router (Binance CCXT Pro + Oanda v20), paper/live mode
+  # ─────────────────────────────────────────────────────────────────────────
+  executor:
+    build:
+      context: .
+      dockerfile: services/executor/Containerfile
+    container_name: mezna-executor
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: executor
+      SERVICE_PORT: "8004"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./services/executor/app:/app/app
+    ports:
+      - "127.0.0.1:8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8004/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # AI-FILTER — Claude Haiku soft gate, async scoring, 800ms timeout
+  # Phase 2 — comment out in Phase 0 if ANTHROPIC_API_KEY is not set
+  # ─────────────────────────────────────────────────────────────────────────
+  ai-filter:
+    build:
+      context: .
+      dockerfile: services/ai-filter/Containerfile
+    container_name: mezna-ai-filter
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: ai-filter
+      SERVICE_PORT: "8005"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./services/ai-filter/app:/app/app
+    ports:
+      - "127.0.0.1:8005:8005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8005/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOURNAL — trade recording, reconciliation, audit log, P&L
+  # ─────────────────────────────────────────────────────────────────────────
+  journal:
+    build:
+      context: .
+      dockerfile: services/journal/Containerfile
+    container_name: mezna-journal
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: journal
+      SERVICE_PORT: "8006"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./services/journal/app:/app/app
+    ports:
+      - "127.0.0.1:8006:8006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8006/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # NOTIFICATIONS — Telegram + Discord alert dispatcher
+  # ─────────────────────────────────────────────────────────────────────────
+  notifications:
+    build:
+      context: .
+      dockerfile: services/notifications/Containerfile
+    container_name: mezna-notifications
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: notifications
+      SERVICE_PORT: "8007"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./services/notifications/app:/app/app
+    ports:
+      - "127.0.0.1:8007:8007"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8007/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # DASHBOARD — Streamlit operator panel
+  # ─────────────────────────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: services/dashboard/Containerfile
+    container_name: mezna-dashboard
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: dashboard
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+      REDIS_URL: redis://redis:6379/0
+      GATEWAY_URL: http://gateway:8000
+      GRAFANA_URL: http://localhost:3000   # host-side URL — user accesses Grafana on their browser
+      # Tells the dashboard it's running inside a container.
+      # Enables host.containers.internal routing for the Windows-native MT5 bridge.
+      RUNNING_IN_CONTAINER: "true"
+    volumes:
+      - ./services/dashboard/app:/app/app
+    ports:
+      - "127.0.0.1:8501:8501"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mezna-net
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # BACKTEST — historical simulation + walk-forward compare vs live trades
+  # Now wired to DB so /backtest/compare/* can read journal trade data.
+  # ─────────────────────────────────────────────────────────────────────────
+  backtest:
+    build:
+      context: .
+      dockerfile: services/backtest/Containerfile
+    container_name: mezna-backtest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: backtest
+      SERVICE_PORT: "8008"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ./services/backtest/app:/app/app
+    ports:
+      - "127.0.0.1:8008:8008"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8008/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # OBSERVABILITY — Prometheus + Grafana + Loki + Promtail
+  # All services expose /metrics. Grafana is pre-provisioned with dashboards.
+  #
+  # Access:
+  #   Grafana:    http://localhost:3000  (admin / ${GRAFANA_PASSWORD})
+  #   Prometheus: http://localhost:9090
+  #   Loki:       http://localhost:3100  (via Grafana — not direct)
+  # ─────────────────────────────────────────────────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: mezna-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION_DAYS:-15}d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  loki:
+    image: grafana/loki:latest
+    container_name: mezna-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - loki_data:/loki
+      - ./infrastructure/loki/loki-config.yml:/etc/loki/config.yml:ro
+    ports:
+      - "127.0.0.1:3100:3100"
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: mezna-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./infrastructure/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      # Mount the Podman/Docker socket so Promtail can discover containers.
+      # Podman rootless on Linux:  /run/user/1000/podman/podman.sock
+      # Podman rootful on Linux:   /run/podman/podman.sock
+      # Adjust PODMAN_SOCKET_PATH in your .env if the path differs.
+      - ${PODMAN_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    networks:
+      - mezna-net
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mezna-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER:     admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-mezna_grafana}
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+      GF_FEATURE_TOGGLES_ENABLE:  publicDashboards
+      GF_LOG_LEVEL:               warn
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # RAG SYSTEM — Qdrant vector DB + grounded knowledge service
+  # ─────────────────────────────────────────────────────────────────────────
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: mezna-qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "127.0.0.1:6333:6333"
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:6333/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  rag:
+    build:
+      context: .
+      dockerfile: services/rag/Containerfile
+    container_name: mezna-rag
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: rag
+      SERVICE_PORT: "8009"
+      QDRANT_URL: http://qdrant:6333
+    volumes:
+      - ./services/rag/app:/app/app
+    ports:
+      - "127.0.0.1:8009:8009"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8009/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

@@ -1,0 +1,66 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MeznaQuantFX AI — Loki Configuration
+#
+# Loki is used for structured log aggregation from all services.
+# Logs are stored on local filesystem (loki_data volume).
+# Query via Grafana Explore tab (LogQL).
+#
+# Retention: 744 hours (31 days).
+# ─────────────────────────────────────────────────────────────────────────────
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  log_level:        warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix:   /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory:  /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+# ── Ingestion limits ──────────────────────────────────────────────────────────
+limits_config:
+  # Allow out-of-order log ingestion (Podman timestamps can drift slightly)
+  allow_structured_metadata:   true
+  reject_old_samples:          true
+  reject_old_samples_max_age:  168h   # 7 days
+
+# ── Schema ────────────────────────────────────────────────────────────────────
+schema_config:
+  configs:
+    - from:          "2024-01-01"
+      store:         tsdb
+      object_store:  filesystem
+      schema:        v13
+      index:
+        prefix: index_
+        period: 24h
+
+# ── Retention (31 days) ───────────────────────────────────────────────────────
+compactor:
+  working_directory:           /loki/compactor
+  compaction_interval:         10m
+  retention_enabled:           true
+  retention_delete_delay:      2h
+  retention_delete_worker_count: 150
+
+# ── Query engine ──────────────────────────────────────────────────────────────
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled:   true
+        max_size_mb: 100
+
+ruler:
+  alertmanager_url: http://localhost:9093

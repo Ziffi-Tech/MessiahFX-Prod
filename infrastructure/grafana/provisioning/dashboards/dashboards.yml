@@ -1,0 +1,20 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana Dashboard Provisioner
+# Automatically loads all dashboard JSON files from the dashboards directory.
+# New files dropped into infrastructure/grafana/dashboards/ are loaded on
+# next Grafana restart or reload.
+# ─────────────────────────────────────────────────────────────────────────────
+
+apiVersion: 1
+
+providers:
+  - name: MeznaQuantFX
+    orgId: 1
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: true

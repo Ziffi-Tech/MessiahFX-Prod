@@ -1,0 +1,74 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MeznaQuantFX AI — Promtail Configuration
+#
+# Promtail collects container logs and ships them to Loki.
+# It uses the Docker-compatible socket exposed by Podman.
+#
+# Podman socket path (set via PODMAN_SOCKET_PATH in compose env or adjust here):
+#   Podman rootless on Linux:  /run/user/1000/podman/podman.sock
+#   Podman rootful on Linux:   /run/podman/podman.sock
+#   Podman Desktop on Windows: mounted via compose volume below
+#
+# The socket is mounted at /var/run/docker.sock inside the promtail container
+# (see podman-compose.yml volumes section).
+# ─────────────────────────────────────────────────────────────────────────────
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level:        warn
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+
+  # ── Docker / Podman container log discovery ──────────────────────────────
+  - job_name: containers
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 10s
+        filters:
+          # Only collect logs from our stack (label set by compose)
+          - name: label
+            values: ["com.docker.compose.project=mezna-quantfx"]
+
+    relabel_configs:
+      # Use the container name as the service label
+      - source_labels: [__meta_docker_container_name]
+        target_label:  service
+        regex:         "/(.*)"
+        replacement:   "$1"
+
+      # Add compose service label
+      - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+        target_label:  compose_service
+
+      # Preserve container ID for log correlation
+      - source_labels: [__meta_docker_container_id]
+        target_label:  container_id
+        regex:         "(......)"    # first 6 chars
+        replacement:   "$1"
+
+    pipeline_stages:
+      # Services emit JSON logs via structlog — parse them
+      - json:
+          expressions:
+            level:     level
+            event:     event
+            service:   service
+            timestamp: timestamp
+
+      # Map structlog level names to Loki log level convention
+      - labels:
+          level:
+          service:
+
+      # Drop very verbose DEBUG logs to save storage
+      - drop:
+          expression: '.*level.*debug.*'
+          drop_counter_reason: debug_dropped

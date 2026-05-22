@@ -1,0 +1,103 @@
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MeznaQuantFX AI — Prometheus Scrape Configuration
+#
+# All services expose /metrics via prometheus-fastapi-instrumentator.
+# Prometheus scrapes every 15 seconds. Retention: 15 days (see compose env).
+# ─────────────────────────────────────────────────────────────────────────────
+
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  scrape_timeout:      10s
+
+  external_labels:
+    environment: "production"
+    project:     "mezna-quantfx"
+
+# ── Alerting ──────────────────────────────────────────────────────────────────
+# Add alertmanager here when you add alert rules
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets: ['alertmanager:9093']
+
+# ── Scrape configs ────────────────────────────────────────────────────────────
+scrape_configs:
+
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # ── Application services ──────────────────────────────────────────────────
+
+  - job_name: "gateway"
+    static_configs:
+      - targets: ["gateway:8000"]
+        labels:
+          service: "gateway"
+          role:    "api-gateway"
+
+  - job_name: "market-data"
+    static_configs:
+      - targets: ["market-data:8001"]
+        labels:
+          service: "market-data"
+          role:    "feed-ingestion"
+
+  - job_name: "strategy"
+    static_configs:
+      - targets: ["strategy:8002"]
+        labels:
+          service: "strategy"
+          role:    "signal-generation"
+
+  - job_name: "risk"
+    static_configs:
+      - targets: ["risk:8003"]
+        labels:
+          service: "risk"
+          role:    "risk-engine"
+
+  - job_name: "executor"
+    static_configs:
+      - targets: ["executor:8004"]
+        labels:
+          service: "executor"
+          role:    "order-router"
+
+  - job_name: "ai-filter"
+    static_configs:
+      - targets: ["ai-filter:8005"]
+        labels:
+          service: "ai-filter"
+          role:    "ml-scoring"
+
+  - job_name: "journal"
+    static_configs:
+      - targets: ["journal:8006"]
+        labels:
+          service: "journal"
+          role:    "trade-recording"
+
+  - job_name: "notifications"
+    static_configs:
+      - targets: ["notifications:8007"]
+        labels:
+          service: "notifications"
+          role:    "alerting"
+
+  - job_name: "backtest"
+    static_configs:
+      - targets: ["backtest:8008"]
+        labels:
+          service: "backtest"
+          role:    "simulation"
+
+  - job_name: "rag"
+    static_configs:
+      - targets: ["rag:8009"]
+        labels:
+          service: "rag"
+          role:    "knowledge"
