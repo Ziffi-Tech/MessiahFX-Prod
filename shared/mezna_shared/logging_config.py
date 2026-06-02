@@ -36,7 +36,8 @@ def setup_logging(
     shared_processors: list[Any] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
-        structlog.stdlib.add_logger_name,
+        # add_logger_name omitted — incompatible with PrintLoggerFactory (.name missing)
+        # service name is injected by _inject_service_name processor below instead
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.StackInfoRenderer(),

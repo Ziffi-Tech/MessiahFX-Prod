@@ -83,6 +83,7 @@ services:
     build:
       context: .
       dockerfile: services/migrate/Containerfile
+    image: localhost/mezna-migrate:latest
     container_name: mezna-migrate
     env_file:
       - .env
@@ -102,6 +103,7 @@ services:
     build:
       context: .
       dockerfile: services/gateway/Containerfile
+    image: localhost/mezna-gateway:latest
     container_name: mezna-gateway
     restart: unless-stopped
     env_file:
@@ -114,7 +116,7 @@ services:
     volumes:
       - ./services/gateway/app:/app/app  # hot-reload in dev
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8080:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -138,6 +140,7 @@ services:
     build:
       context: .
       dockerfile: services/market-data/Containerfile
+    image: localhost/mezna-market-data:latest
     container_name: mezna-market-data
     restart: unless-stopped
     env_file:
@@ -174,6 +177,7 @@ services:
     build:
       context: .
       dockerfile: services/strategy/Containerfile
+    image: localhost/mezna-strategy:latest
     container_name: mezna-strategy
     restart: unless-stopped
     env_file:
@@ -210,6 +214,7 @@ services:
     build:
       context: .
       dockerfile: services/risk/Containerfile
+    image: localhost/mezna-risk:latest
     container_name: mezna-risk
     restart: unless-stopped
     env_file:
@@ -246,6 +251,7 @@ services:
     build:
       context: .
       dockerfile: services/executor/Containerfile
+    image: localhost/mezna-executor:latest
     container_name: mezna-executor
     restart: unless-stopped
     env_file:
@@ -283,6 +289,7 @@ services:
     build:
       context: .
       dockerfile: services/ai-filter/Containerfile
+    image: localhost/mezna-ai-filter:latest
     container_name: mezna-ai-filter
     restart: unless-stopped
     env_file:
@@ -319,6 +326,7 @@ services:
     build:
       context: .
       dockerfile: services/journal/Containerfile
+    image: localhost/mezna-journal:latest
     container_name: mezna-journal
     restart: unless-stopped
     env_file:
@@ -355,6 +363,7 @@ services:
     build:
       context: .
       dockerfile: services/notifications/Containerfile
+    image: localhost/mezna-notifications:latest
     container_name: mezna-notifications
     restart: unless-stopped
     env_file:
@@ -387,6 +396,7 @@ services:
     build:
       context: .
       dockerfile: services/dashboard/Containerfile
+    image: localhost/mezna-dashboard:latest
     container_name: mezna-dashboard
     restart: unless-stopped
     env_file:
@@ -420,6 +430,7 @@ services:
     build:
       context: .
       dockerfile: services/backtest/Containerfile
+    image: localhost/mezna-backtest:latest
     container_name: mezna-backtest
     restart: unless-stopped
     env_file:
@@ -572,6 +583,7 @@ services:
     build:
       context: .
       dockerfile: services/rag/Containerfile
+    image: localhost/mezna-rag:latest
     container_name: mezna-rag
     restart: unless-stopped
     env_file:
