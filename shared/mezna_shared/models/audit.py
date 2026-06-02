@@ -55,8 +55,8 @@ class AuditLog(Base):
         JSONB, nullable=False, default=dict,
         comment="Full event payload. Schema varies by event_type."
     )
-    metadata: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict,
+    event_context: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False, default=dict,
         comment="Runtime context: hostname, version, correlation_id, etc."
     )
 

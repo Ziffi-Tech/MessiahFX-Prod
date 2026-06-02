@@ -61,10 +61,9 @@ def upgrade() -> None:
     op.create_index("ix_opportunities_strategy_type", "opportunities", ["strategy_type"])
     op.create_index("ix_opportunities_venue", "opportunities", ["venue"])
     op.create_index("ix_opportunities_symbol_primary", "opportunities", ["symbol_primary"])
-    # Convert to TimescaleDB hypertable (partitioned by detected_at, 7-day chunks)
-    op.execute(
-        "SELECT create_hypertable('opportunities', 'detected_at', chunk_time_interval => INTERVAL '7 days');"
-    )
+    # NOTE: TimescaleDB hypertable requires partitioning column in primary key.
+    # Hypertable conversion is deferred to a later migration once the schema is
+    # stable and data volume justifies it. Regular PG indexes handle early traffic.
 
     # ── trades ────────────────────────────────────────────────────────────────
     op.create_table(
@@ -103,9 +102,7 @@ def upgrade() -> None:
     op.create_index("ix_trades_strategy_type", "trades", ["strategy_type"])
     op.create_index("ix_trades_paper_mode", "trades", ["paper_mode"])
     op.create_index("ix_trades_exchange_order_id", "trades", ["exchange_order_id"])
-    op.execute(
-        "SELECT create_hypertable('trades', 'opened_at', chunk_time_interval => INTERVAL '7 days');"
-    )
+    # Hypertable deferred — see note above on opportunities table.
 
     # ── audit_log ─────────────────────────────────────────────────────────────
     op.create_table(
@@ -123,9 +120,7 @@ def upgrade() -> None:
     op.create_index("ix_audit_log_event_type", "audit_log", ["event_type"])
     op.create_index("ix_audit_log_service", "audit_log", ["service"])
     op.create_index("ix_audit_log_entity_id", "audit_log", ["entity_id"])
-    op.execute(
-        "SELECT create_hypertable('audit_log', 'created_at', chunk_time_interval => INTERVAL '1 day');"
-    )
+    # Hypertable deferred — see note above on opportunities table.
 
     # ── risk_events ───────────────────────────────────────────────────────────
     op.create_table(
@@ -199,9 +194,9 @@ def upgrade() -> None:
         sa.Column("ask", sa.Numeric(20, 8), nullable=True),
         sa.Column("spread_bps", sa.Numeric(10, 4), nullable=True),
     )
-    op.execute(
-        "SELECT create_hypertable('market_snapshots', 'time', chunk_time_interval => INTERVAL '1 day');"
-    )
+    # Hypertable deferred — market_snapshots has no UUID pk conflict but keeping
+    # consistent with other tables. Add in migration 003 with composite pk.
+    op.create_index("ix_market_snapshots_time", "market_snapshots", ["time"])
     op.create_index("ix_market_snapshots_venue_symbol", "market_snapshots", ["venue", "symbol"])
 
 
