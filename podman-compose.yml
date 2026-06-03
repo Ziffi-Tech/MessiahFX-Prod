@@ -390,7 +390,7 @@ services:
       start_period: 40s
 
   # ─────────────────────────────────────────────────────────────────────────
-  # DASHBOARD — Streamlit operator panel
+  # DASHBOARD — Streamlit operator panel (legacy, kept for reference)
   # ─────────────────────────────────────────────────────────────────────────
   dashboard:
     build:
@@ -406,12 +406,6 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
       REDIS_URL: redis://redis:6379/0
       GATEWAY_URL: http://gateway:8000
-      GRAFANA_URL: http://localhost:3000   # host-side URL — user accesses Grafana on their browser
-      # Tells the dashboard it's running inside a container.
-      # Enables host.containers.internal routing for the Windows-native MT5 bridge.
-      RUNNING_IN_CONTAINER: "true"
-    volumes:
-      - ./services/dashboard/app:/app/app
     ports:
       - "127.0.0.1:8501:8501"
     depends_on:
@@ -421,6 +415,33 @@ services:
         condition: service_healthy
     networks:
       - mezna-net
+
+  # DASHBOARD-NEXT — Production Next.js trading cockpit
+  # ─────────────────────────────────────────────────────────────────────────
+  dashboard-next:
+    build:
+      context: .
+      dockerfile: services/dashboard-next/Containerfile
+    image: localhost/mezna-dashboard-next:latest
+    container_name: mezna-dashboard-next
+    restart: unless-stopped
+    environment:
+      GATEWAY_URL: http://gateway:8000
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-mezna}
+      NODE_ENV: production
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - mezna-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/auth').then(()=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # ─────────────────────────────────────────────────────────────────────────
   # BACKTEST — historical simulation + walk-forward compare vs live trades

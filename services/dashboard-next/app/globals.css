@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+/* ─── Bloomberg Terminal Design Tokens ─────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --bg-base:      #08090d;
+  --bg-surface:   #0e1118;
+  --bg-surface-2: #141822;
+  --bg-surface-3: #1a2030;
+  --bg-hover:     #1e2535;
+
+  /* Borders */
+  --border:        #252c3b;
+  --border-subtle: #1a2030;
+  --border-bright: #374151;
+
+  /* Text */
+  --text-primary:   #e2e8f4;
+  --text-secondary: #7d8a9e;
+  --text-tertiary:  #3d4a5c;
+
+  /* Trading colours */
+  --green:        #00e5a0;
+  --green-dim:    rgba(0, 229, 160, 0.12);
+  --red:          #ff3d57;
+  --red-dim:      rgba(255, 61, 87, 0.12);
+  --blue:         #0ea5e9;
+  --blue-dim:     rgba(14, 165, 233, 0.12);
+  --orange:       #fb923c;
+  --orange-dim:   rgba(251, 146, 60, 0.12);
+  --purple:       #a78bfa;
+  --purple-dim:   rgba(167, 139, 250, 0.12);
+  --yellow:       #fbbf24;
+
+  /* Semantic aliases */
+  --profit:    var(--green);
+  --loss:      var(--red);
+  --buy:       var(--blue);
+  --sell:      var(--orange);
+  --warning:   var(--yellow);
+  --ai-accent: var(--purple);
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius:    6px;
+  --radius-lg: 10px;
+
+  /* Mono font */
+  --font-mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+}
+
+/* ─── Base ──────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-font-smoothing: antialiased; font-size: 14px; }
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, sans-serif;
+  min-height: 100dvh;
+}
+
+/* Numbers use monospace with tabular figures */
+.mono, [data-numeric], .tabular-nums {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* ─── Scrollbar ─────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+::selection { background: rgba(14, 165, 233, 0.3); }
+
+/* ─── Utility classes ───────────────────────────────────────────────────── */
+.profit     { color: var(--green) !important; }
+.loss       { color: var(--red)   !important; }
+.profit-bg  { background: var(--green-dim); }
+.loss-bg    { background: var(--red-dim); }
+
+.panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* ─── Badges ────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 100px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.badge-green  { background: var(--green-dim);  color: var(--green); }
+.badge-red    { background: var(--red-dim);    color: var(--red); }
+.badge-blue   { background: var(--blue-dim);   color: var(--blue); }
+.badge-orange { background: var(--orange-dim); color: var(--orange); }
+.badge-purple { background: var(--purple-dim); color: var(--purple); }
+.badge-gray   { background: rgba(125,138,158,0.12); color: var(--text-secondary); }
+
+/* ─── Live indicator dot ────────────────────────────────────────────────── */
+@keyframes flicker { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+.live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: flicker 2s ease-in-out infinite;
+}
+
+/* ─── Number flash on change ────────────────────────────────────────────── */
+@keyframes flash-green { 0% { color: var(--green); } 100% { } }
+@keyframes flash-red   { 0% { color: var(--red);   } 100% { } }
+.flash-up   { animation: flash-green 0.8s ease-out; }
+.flash-down { animation: flash-red   0.8s ease-out; }
+
+/* ─── AI panel purple glow ──────────────────────────────────────────────── */
+.ai-panel {
+  position: relative;
+  border-color: transparent !important;
+}
+.ai-panel::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: calc(var(--radius) + 1px);
+  background: linear-gradient(135deg, var(--purple), var(--blue));
+  opacity: 0.25;
+  z-index: -1;
+}
