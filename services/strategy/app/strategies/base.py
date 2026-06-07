@@ -12,6 +12,7 @@ import structlog
 from redis.asyncio import Redis
 
 from mezna_shared.redis_client import RedisKeys
+from mezna_shared.bars import ticks_to_ohlcv
 
 log = structlog.get_logger()
 
@@ -48,6 +49,26 @@ async def read_tick_cache(redis: Redis, venue: str, symbol: str, n: int) -> list
         except (json.JSONDecodeError, TypeError):
             continue
     return ticks
+
+
+async def read_ohlcv(
+    redis: Redis,
+    venue: str,
+    symbol: str,
+    interval_seconds: int,
+    *,
+    max_ticks: int = 2000,
+    price_field: str = "mid",
+) -> list[dict]:
+    """
+    Build OHLCV bars (oldest-first) from the recent tick cache.
+
+    Convenience wrapper: read_tick_cache → mezna_shared.bars.ticks_to_ohlcv.
+    Lets strategies (and standard indicator libs like pandas-ta) work on candles
+    instead of the raw quote-tick stream. Returns [] if no usable ticks.
+    """
+    ticks = await read_tick_cache(redis, venue, symbol, max_ticks)
+    return ticks_to_ohlcv(ticks, interval_seconds, price_field=price_field)
 
 
 async def is_halted(redis: Redis) -> bool:
