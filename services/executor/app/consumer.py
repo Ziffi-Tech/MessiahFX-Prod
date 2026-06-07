@@ -16,7 +16,9 @@ Leg direction rules (hard-coded by strategy type):
                   and perp short until funding payment.
   stat_arb     →  SELL primary (overpriced), BUY secondary (underpriced)
                   Rationale: bet on spread reversion to mean.
-  swing        →  Not yet implemented (needs OHLCV — placeholder skipped).
+  swing, breakout, momentum, mean_reversion_scalp →
+                  Single-leg directional. Side is resolved from raw_signal
+                  (tv_action / direction) — see _resolve_side / _build_order_plan.
 
 Position sizing:
   quantity = settings.position_usd / current_price
@@ -275,8 +277,21 @@ _LEG_DIRECTIONS: dict[str, list[dict]] = {
         {"leg": "primary",   "side": "sell"},   # sell overpriced leg
         {"leg": "secondary", "side": "buy"},    # buy underpriced leg
     ],
-    # swing is handled separately — single-leg, direction from raw_signal
+    # Single-leg directional strategies (swing, breakout, momentum,
+    # mean_reversion_scalp) are handled separately in _build_order_plan.
 }
+
+# Single-leg directional strategies: one leg, direction read from raw_signal.
+_SINGLE_LEG_STRATEGIES = frozenset({
+    "swing", "breakout", "momentum", "mean_reversion_scalp",
+})
+
+# Every direction token the strategies emit, mapped to an order side.
+#   tv_action  → "buy" / "sell"           (all TradingView-driven signals)
+#   direction  → "long" / "short"         (swing)
+#              → "buy"  / "sell"           (breakout / momentum / mean_reversion run_once)
+_BUY_TOKENS  = frozenset({"buy", "long"})
+_SELL_TOKENS = frozenset({"sell", "short"})
 
 
 # ── Consumer group management ─────────────────────────────────────────────────
@@ -342,6 +357,26 @@ async def _calc_quantity(
 
 # ── Order plan builder ────────────────────────────────────────────────────────
 
+def _resolve_side(raw_signal: dict) -> str | None:
+    """
+    Resolve an order side ("buy"/"sell") from a single-leg strategy's raw_signal.
+
+    Handles both encodings the strategies emit:
+      - tv_action: "buy" | "sell"     (TradingView-driven run_from_signal path)
+      - direction: "long" | "short"   (swing)
+                   "buy"  | "sell"     (breakout / momentum / mean_reversion run_once)
+
+    tv_action takes precedence when present. Returns None if undeterminable.
+    """
+    for field in ("tv_action", "direction"):
+        token = str(raw_signal.get(field, "")).strip().lower()
+        if token in _BUY_TOKENS:
+            return "buy"
+        if token in _SELL_TOKENS:
+            return "sell"
+    return None
+
+
 def _build_order_plan(payload: dict) -> list[dict]:
     """
     Return an ordered list of leg descriptors for this opportunity.
@@ -354,29 +389,27 @@ def _build_order_plan(payload: dict) -> list[dict]:
     symbol_primary = payload.get("symbol_primary", "")
     symbol_secondary = payload.get("symbol_secondary")
 
-    # ── Swing: single-leg directional trade, direction from TradingView signal ──
-    if strategy_type == "swing":
+    # ── Single-leg directional strategies ─────────────────────────────────────
+    # swing, breakout, momentum, mean_reversion_scalp each publish ONE directional
+    # leg, with the side carried in raw_signal. Previously only swing was handled
+    # here; breakout/momentum/mean_reversion fell through to the spread branch,
+    # matched no _LEG_DIRECTIONS entry, and were SILENTLY DROPPED — i.e. half the
+    # strategies could publish risk-approved opportunities that never executed.
+    if strategy_type in _SINGLE_LEG_STRATEGIES:
         raw_signal = payload.get("raw_signal") or {}
-        tv_action = raw_signal.get("tv_action", "")
-        direction = raw_signal.get("direction", "")
-
-        # Determine side from tv_action or direction field
-        if tv_action in ("buy",) or direction == "long":
-            side = "buy"
-        elif tv_action in ("sell",) or direction == "short":
-            side = "sell"
-        else:
+        side = _resolve_side(raw_signal)
+        if side is None:
             log.warning(
-                "executor.swing_unknown_direction",
+                "executor.unresolved_direction",
                 strategy_type=strategy_type,
-                tv_action=tv_action,
-                direction=direction,
+                tv_action=raw_signal.get("tv_action"),
+                direction=raw_signal.get("direction"),
                 hint="Cannot determine trade direction — skipping",
             )
             return []
 
         if not symbol_primary:
-            log.error("executor.swing_missing_symbol", strategy_type=strategy_type)
+            log.error("executor.missing_primary_symbol", strategy_type=strategy_type)
             return []
 
         return [{"venue": venue, "symbol": symbol_primary, "side": side}]
