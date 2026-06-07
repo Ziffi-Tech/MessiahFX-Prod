@@ -7,4 +7,8 @@ numpy>=2.0
 pandas>=2.2
 scipy>=1.14
 statsmodels>=0.14
+# Technical-analysis indicators on OHLCV bars (ATR/RSI/BBANDS/...).
+# pandas-ta-classic is the maintained fork that supports numpy>=2.0 (the original
+# pandas-ta imports numpy.NaN, removed in numpy 2.0). Imported as pandas_ta_classic.
+pandas-ta-classic>=0.3
 prometheus-fastapi-instrumentator>=0.21.0

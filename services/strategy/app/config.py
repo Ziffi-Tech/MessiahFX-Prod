@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     BREAKOUT_ATR_MULT: float = 0.5
     BREAKOUT_MIN_EDGE_BPS: float = 4.0
     BREAKOUT_FEE_BPS: float = 10.0
+    # Bar-based detection: real ATR (pandas-ta) on OHLCV candles built from the
+    # tick cache, instead of the tick-mid approximation. OFF by default — the
+    # 500-tick cache may not hold a full BREAKOUT_LOOKBACK of BREAKOUT_BAR_SECONDS
+    # candles for liquid symbols, so enable once tick history / bar persistence is
+    # sufficient. Falls back to tick-based detection when OFF or pandas-ta absent.
+    BREAKOUT_USE_BARS: bool = False
+    BREAKOUT_BAR_SECONDS: int = 15
 
     # ── Mean Reversion Scalp parameters ──────────────────────────────────────
     MEAN_REVERSION_SYMBOLS: str = "BTC/USDT,ETH/USDT,EUR_USD,GBP_USD,EUR_GBP"

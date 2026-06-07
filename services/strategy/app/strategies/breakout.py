@@ -37,8 +37,18 @@ from redis.asyncio import Redis
 
 from ..config import Settings
 from ..publisher import publish_opportunity
-from .base import read_tick_cache, read_latest_tick, is_halted
+from .base import read_tick_cache, read_latest_tick, is_halted, read_ohlcv
+from mezna_shared.bars import ohlcv_columns
 from mezna_shared.schemas.opportunity import OpportunityCreate
+
+try:
+    import pandas as pd
+    import pandas_ta_classic as ta
+    _HAS_PANDAS_TA = True
+except Exception:  # pandas-ta optional — bar mode falls back to tick detection
+    pd = None
+    ta = None
+    _HAS_PANDAS_TA = False
 
 log = structlog.get_logger()
 
@@ -120,6 +130,67 @@ def _detect_breakout(
     return None
 
 
+def _detect_breakout_bars(
+    bars: list[dict],
+    lookback: int,
+    atr_period: int,
+    atr_mult: float,
+) -> Optional[dict]:
+    """
+    Bar-based breakout detection: a true ATR (pandas-ta) on OHLCV candles and the
+    highest-high / lowest-low range over the lookback window.
+
+    Returns the same dict shape as _detect_breakout (so run_once is unchanged), or
+    None when pandas-ta is unavailable, there are too few bars, or ATR is invalid.
+    """
+    if not _HAS_PANDAS_TA or len(bars) < lookback + atr_period + 2:
+        return None
+
+    cols = ohlcv_columns(bars)
+    df = pd.DataFrame({
+        "high":  [float(x) for x in cols["high"]],
+        "low":   [float(x) for x in cols["low"]],
+        "close": [float(x) for x in cols["close"]],
+    })
+
+    atr_series = ta.atr(df["high"], df["low"], df["close"], length=atr_period)
+    if atr_series is None or atr_series.dropna().empty:
+        return None
+    atr = float(atr_series.iloc[-1])
+    if not np.isfinite(atr) or atr <= 0:
+        return None
+
+    current = float(df["close"].iloc[-1])
+    # Range over the `lookback` COMPLETED bars before the current (last) bar.
+    window_high = df["high"].iloc[-(lookback + 1):-1]
+    window_low = df["low"].iloc[-(lookback + 1):-1]
+    if window_high.empty or window_low.empty:
+        return None
+    range_high = float(window_high.max())
+    range_low = float(window_low.min())
+
+    threshold = atr * atr_mult
+    if current > range_high + threshold:
+        return {
+            "direction": "buy",
+            "range_high": range_high,
+            "range_low": range_low,
+            "atr": atr,
+            "current_price": current,
+            "breakout_distance": current - range_high,
+        }
+    if current < range_low - threshold:
+        return {
+            "direction": "sell",
+            "range_high": range_high,
+            "range_low": range_low,
+            "atr": atr,
+            "current_price": current,
+            "breakout_distance": range_low - current,
+        }
+    return None
+
+
 class BreakoutStrategy:
     """ATR-filtered breakout strategy for trending market regimes."""
 
@@ -154,14 +225,23 @@ class BreakoutStrategy:
         min_edge  = self._settings.BREAKOUT_MIN_EDGE_BPS
         fee_bps   = self._settings.BREAKOUT_FEE_BPS
 
+        use_bars = self._settings.BREAKOUT_USE_BARS and _HAS_PANDAS_TA
+        bar_seconds = self._settings.BREAKOUT_BAR_SECONDS
+
         for symbol in self._settings.breakout_symbol_list:
             venue = "binance" if "USDT" in symbol else "oanda"
-            ticks = await read_tick_cache(redis, venue, symbol, lookback + atr_period + 10)
 
-            if len(ticks) < BREAKOUT_MIN_TICKS:
-                continue
+            if use_bars:
+                # Real ATR/range on OHLCV candles resampled from the tick cache.
+                bars = await read_ohlcv(redis, venue, symbol, bar_seconds, max_ticks=500)
+                signal = _detect_breakout_bars(bars, lookback, atr_period, atr_mult)
+            else:
+                # Tick-based approximation (default; see BREAKOUT_USE_BARS).
+                ticks = await read_tick_cache(redis, venue, symbol, lookback + atr_period + 10)
+                if len(ticks) < BREAKOUT_MIN_TICKS:
+                    continue
+                signal = _detect_breakout(ticks, lookback, atr_period, atr_mult)
 
-            signal = _detect_breakout(ticks, lookback, atr_period, atr_mult)
             if signal is None:
                 continue
 
