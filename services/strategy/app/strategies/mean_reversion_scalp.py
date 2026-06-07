@@ -50,6 +50,7 @@ from ..config import Settings
 from ..publisher import publish_opportunity
 from .base import read_tick_cache, read_latest_tick, is_halted, read_ohlcv
 from mezna_shared.bars import ohlcv_columns
+from mezna_shared.venues import parse_symbol_spec
 from mezna_shared.schemas.opportunity import OpportunityCreate
 
 try:
@@ -270,8 +271,8 @@ class MeanReversionScalpStrategy:
         use_bars = self._settings.MR_USE_BARS and _HAS_PANDAS_TA
         bar_seconds = self._settings.MR_BAR_SECONDS
 
-        for symbol in self._settings.mean_reversion_symbol_list:
-            venue = "binance" if "USDT" in symbol else "oanda"
+        for spec in self._settings.mean_reversion_symbol_list:
+            venue, symbol = parse_symbol_spec(spec)
 
             if use_bars:
                 bars = await read_ohlcv(redis, venue, symbol, bar_seconds, max_ticks=500)
