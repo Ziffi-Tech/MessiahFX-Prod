@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     BINANCE_SPOT_SYMBOLS: str = "BTC/USDT,ETH/USDT,SOL/USDT"
     BINANCE_PERP_SYMBOLS: str = "BTC/USDT:USDT,ETH/USDT:USDT,SOL/USDT:USDT"
 
+    # Bybit (linear USDT perpetuals via CCXT Pro). Empty = feed disabled.
+    BYBIT_API_KEY: str = ""
+    BYBIT_API_SECRET: str = ""
+    BYBIT_TESTNET: bool = True
+    BYBIT_PERP_SYMBOLS: str = ""   # e.g. "BTC/USDT:USDT,ETH/USDT:USDT"
+
     # Oanda
     OANDA_API_KEY: str = ""
     OANDA_ACCOUNT_ID: str = ""
@@ -39,6 +45,10 @@ class Settings(BaseSettings):
     @property
     def binance_perp_list(self) -> list[str]:
         return [s.strip() for s in self.BINANCE_PERP_SYMBOLS.split(",") if s.strip()]
+
+    @property
+    def bybit_perp_list(self) -> list[str]:
+        return [s.strip() for s in self.BYBIT_PERP_SYMBOLS.split(",") if s.strip()]
 
     @property
     def oanda_instrument_list(self) -> list[str]:

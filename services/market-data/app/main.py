@@ -30,7 +30,7 @@ from mezna_shared.redis_client import get_redis, close_redis
 
 from .config import settings
 from .routes import health
-from .feeds import binance_feed, oanda_feed
+from .feeds import binance_feed, oanda_feed, bybit_feed
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -97,11 +97,19 @@ async def lifespan(app: FastAPI):
     oanda_task.add_done_callback(_on_feed_task_done)
     _feed_tasks.append(oanda_task)
 
+    bybit_task = asyncio.create_task(
+        bybit_feed.run(settings, app.state.redis),
+        name="bybit_feed",
+    )
+    bybit_task.add_done_callback(_on_feed_task_done)
+    _feed_tasks.append(bybit_task)
+
     log.info(
         "service.ready",
         service=settings.SERVICE_NAME,
         binance_spot=settings.binance_spot_list,
         binance_perp=settings.binance_perp_list,
+        bybit_perp=settings.bybit_perp_list,
         oanda_instruments=settings.oanda_instrument_list,
         testnet=settings.BINANCE_TESTNET,
     )
