@@ -146,12 +146,14 @@ async def persist_trade(
     order: OrderRequest,
     result: OrderResult,
     opportunity_id: str | None,
-) -> uuid.UUID | None:
+) -> float | None:
     """
     Persist a trade fill to the trades table and update its position.
 
-    Returns the trade UUID on success, or None if the row already existed
-    (idempotent replay — the executor crashed and reprocessed the message).
+    Returns the fill's NET realized P&L (0.0 for opens/adds; ±x when the fill
+    reduces or closes a position) so the caller can drive realized-P&L stats.
+    Returns None for a non-fill (rejected/error) or an idempotent duplicate
+    replay (the executor crashed and reprocessed the message).
 
     Raises on unexpected database errors — caller should log and continue
     so a DB blip doesn't halt the entire execution pipeline.
@@ -286,7 +288,7 @@ async def persist_trade(
                 realized_pnl=realized_pnl,
                 paper=order.paper_mode,
             )
-            return trade_id
+            return realized_pnl
         else:
             log.warning(
                 "db.trade_duplicate_skipped",

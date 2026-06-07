@@ -107,34 +107,42 @@ _ROTATION_TTL          = 14400   # 4 h degraded TTL
 _EDGE_TTL              = 86400   # 1 day
 
 
-async def _record_execution_outcome(
+async def _record_outcome(
     redis: Redis,
     strategy: str,
-    won: bool,
-    proxy_pnl_usd: float,
-    position_usd: float,
+    filled_ok: bool,
+    realized_pnl: float,
 ) -> None:
     """
-    Record trade outcome to rotation engine, edge monitor, and drawdown tracker.
+    Record a trade outcome to the rotation engine, edge monitor, and drawdown tracker.
 
-    Runs fire-and-forget after successful order processing.
-    All exceptions are caught — this must never interrupt execution.
+    Driven by REAL realized P&L (average-cost, written per fill by persist_trade),
+    replacing the prior expected-edge proxy so the edge win-rate and the Kelly
+    inputs (avg win / avg loss) reflect actual round trips. Fire-and-forget; all
+    exceptions are caught so this never interrupts execution.
+
+    Semantics:
+      rotation (consecutive-loss → degrade):
+        loss  = execution failure (not filled_ok) OR a losing close (realized_pnl < 0)
+        win   = a winning close (realized_pnl > 0) → reset the counter
+        open / scratch (filled, realized_pnl == 0) → neutral
+      edge win-rate, avg win/loss (Kelly), drawdown:
+        updated only on a realized CLOSE (realized_pnl != 0), using the real P&L.
 
     Args:
-        strategy:       strategy name
-        won:            True if all legs filled, False on any execution error
-        proxy_pnl_usd:  Expected net P&L proxy (net_edge_bps * position_usd / 10000)
-        position_usd:   Notional position size used for sizing P&L proxy
+        filled_ok:    True if every leg of the opportunity filled.
+        realized_pnl: net realized P&L summed across the opportunity's fills
+                      (0 for pure opens; nonzero when a position was reduced/closed).
     """
     try:
         # ── 1. Rotation engine (consecutive loss counter) ──────────────────────
         loss_key = _ROTATION_LOSSES_KEY.format(name=strategy)
         degraded_key = _ROTATION_DEGRADED_KEY.format(name=strategy)
 
-        if won:
+        if filled_ok and realized_pnl > 0:
             await redis.delete(loss_key)
             await redis.delete(degraded_key)
-        else:
+        elif (not filled_ok) or realized_pnl < 0:
             count = await redis.incr(loss_key)
             await redis.expire(loss_key, _EDGE_TTL)
 
@@ -150,8 +158,14 @@ async def _record_execution_outcome(
                     consecutive_losses=count,
                     regime=regime,
                 )
+        # else: a filled open / scratch (realized_pnl == 0) — neutral, no change
 
-        # ── 2. Edge decay monitor (rolling win rate) ───────────────────────────
+        # ── Realized-P&L stats only fire on a closed round trip ────────────────
+        if realized_pnl == 0:
+            return
+        won = realized_pnl > 0
+
+        # ── 2. Edge decay monitor (rolling win rate on real outcomes) ──────────
         edge_key = _EDGE_OUTCOMES_KEY.format(name=strategy)
         await redis.rpush(edge_key, "1" if won else "0")
         await redis.ltrim(edge_key, -_EDGE_WINDOW, -1)
@@ -179,32 +193,31 @@ async def _record_execution_outcome(
             elif not below and already_decayed:
                 await redis.delete(_EDGE_DECAYED_KEY.format(name=strategy))
 
-        # ── 3. Rolling avg win / avg loss (for Kelly sizing) ──────────────────
-        if proxy_pnl_usd != 0:
-            win_key  = _STRATEGY_AVG_WIN_KEY.format(name=strategy)
-            loss_key2 = _STRATEGY_AVG_LOSS_KEY.format(name=strategy)
-            if proxy_pnl_usd > 0:
-                # Exponential moving average: new_avg = 0.9 * old + 0.1 * new
-                old_raw = await redis.get(win_key)
-                old = float(old_raw) if old_raw else proxy_pnl_usd
-                await redis.set(win_key, str(round(0.9 * old + 0.1 * proxy_pnl_usd, 4)), ex=_EDGE_TTL)
-            else:
-                old_raw = await redis.get(loss_key2)
-                old = float(old_raw) if old_raw else abs(proxy_pnl_usd)
-                await redis.set(
-                    loss_key2,
-                    str(round(0.9 * old + 0.1 * abs(proxy_pnl_usd), 4)),
-                    ex=_EDGE_TTL,
-                )
+        # ── 3. Rolling avg win / avg loss (Kelly inputs) — REAL realized P&L ───
+        win_key  = _STRATEGY_AVG_WIN_KEY.format(name=strategy)
+        loss_key2 = _STRATEGY_AVG_LOSS_KEY.format(name=strategy)
+        if won:
+            # Exponential moving average: new_avg = 0.9 * old + 0.1 * new
+            old_raw = await redis.get(win_key)
+            old = float(old_raw) if old_raw else realized_pnl
+            await redis.set(win_key, str(round(0.9 * old + 0.1 * realized_pnl, 4)), ex=_EDGE_TTL)
+        else:
+            old_raw = await redis.get(loss_key2)
+            old = float(old_raw) if old_raw else abs(realized_pnl)
+            await redis.set(
+                loss_key2,
+                str(round(0.9 * old + 0.1 * abs(realized_pnl), 4)),
+                ex=_EDGE_TTL,
+            )
 
-        # ── 4. Per-strategy drawdown tracking ─────────────────────────────────
+        # ── 4. Per-strategy drawdown tracking (real cumulative P&L) ───────────
         pnl_key  = _STRAT_PNL_KEY.format(name=strategy)
         peak_key = _STRAT_PEAK_KEY.format(name=strategy)
         dd_key   = _STRAT_DRAWDOWN_KEY.format(name=strategy)
 
         old_cum_raw = await redis.get(pnl_key)
         old_cum = float(old_cum_raw) if old_cum_raw else 0.0
-        new_cum = old_cum + proxy_pnl_usd
+        new_cum = old_cum + realized_pnl
         await redis.set(pnl_key, str(round(new_cum, 4)), ex=_EDGE_TTL)
 
         old_peak_raw = await redis.get(peak_key)
@@ -214,17 +227,15 @@ async def _record_execution_outcome(
 
         if new_peak > 0:
             dd_pct = (new_peak - new_cum) / new_peak * 100.0
-        elif new_peak < 0:
-            dd_pct = 0.0  # All losses, no peak to draw from
         else:
-            dd_pct = 0.0
+            dd_pct = 0.0  # No positive peak to draw down from yet
         await redis.set(dd_key, str(round(dd_pct, 4)), ex=_EDGE_TTL)
 
         log.debug(
             "executor.outcome_recorded",
             strategy=strategy,
             won=won,
-            proxy_pnl=round(proxy_pnl_usd, 4),
+            realized_pnl=round(realized_pnl, 4),
             strategy_drawdown_pct=round(dd_pct, 2),
         )
 
@@ -614,6 +625,7 @@ async def _process(
     # Execute each leg sequentially — preserves ordering and rate limits
     fills_attempted = 0
     fills_ok = 0
+    realized_total = 0.0  # net realized P&L across this opportunity's fills
 
     for i, leg in enumerate(legs):
         leg_label = f"leg{i+1}/{len(legs)}"
@@ -719,9 +731,10 @@ async def _process(
             reason=result.rejection_reason,
         )
 
-        # Persist fill — must succeed before ACK
+        # Persist fill (+ update position / realized P&L) — must succeed before ACK
         try:
-            await trade_db.persist_trade(db_engine, order, result, opportunity_id)
+            realized = await trade_db.persist_trade(db_engine, order, result, opportunity_id)
+            realized_total += realized or 0.0
         except Exception as db_exc:
             # Re-raise so the caller does NOT ACK — message will be redelivered
             log.error(
@@ -739,25 +752,14 @@ async def _process(
         all_filled=fills_ok == fills_attempted,
     )
 
-    # ── Record outcome to rotation engine, edge monitor, drawdown tracker ──────
+    # ── Record outcome — real realized P&L drives edge/Kelly/drawdown; ─────────
+    #    execution success/failure drives rotation (see _record_outcome).
     if fills_attempted > 0 and strategy_type not in ("unknown", ""):
-        won = fills_ok == fills_attempted
-        # Proxy P&L: expected edge × position notional (paper proxy; upgraded in Phase 4)
-        net_edge_bps = float(payload.get("net_edge_bps") or 0.0)
-        fee_bps      = float(payload.get("fee_cost_bps") or 0.0)
-        pos_usd      = position_usd
-        if won:
-            proxy_pnl = (net_edge_bps / 10_000) * pos_usd
-        else:
-            # Execution failure: we incurred friction without capturing edge
-            proxy_pnl = -(fee_bps / 10_000) * pos_usd
-
-        await _record_execution_outcome(
+        await _record_outcome(
             redis=redis,
             strategy=strategy_type,
-            won=won,
-            proxy_pnl_usd=proxy_pnl,
-            position_usd=pos_usd,
+            filled_ok=fills_ok == fills_attempted,
+            realized_pnl=realized_total,
         )
 
 
