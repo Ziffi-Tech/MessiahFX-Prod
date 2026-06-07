@@ -16,6 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from mezna_shared.logging_config import setup_logging
+from mezna_shared.observability import init_sentry
 from mezna_shared.db import get_engine, check_db_connection, dispose_engine
 from mezna_shared.redis_client import get_redis, close_redis
 
@@ -29,6 +30,7 @@ setup_logging(
     debug=settings.DEBUG,
 )
 log = structlog.get_logger()
+init_sentry(service_name=settings.SERVICE_NAME)
 
 _runner_task: asyncio.Task | None = None
 

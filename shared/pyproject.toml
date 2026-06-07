@@ -15,6 +15,9 @@ dependencies = [
     "pydantic-settings>=2.5",
     "structlog>=24.0",
     "cryptography>=42.0",
+    # Production error tracking. Installed for every service via the shared
+    # package; a no-op at runtime until SENTRY_DSN is set (see observability.py).
+    "sentry-sdk[fastapi]>=2.0",
 ]
 
 [tool.setuptools.packages.find]

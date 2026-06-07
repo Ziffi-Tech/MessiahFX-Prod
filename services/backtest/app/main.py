@@ -24,6 +24,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from mezna_shared.logging_config import setup_logging
+from mezna_shared.observability import init_sentry
 from mezna_shared.metrics import setup_metrics
 
 from .config import settings
@@ -37,6 +38,7 @@ setup_logging(
     debug=settings.DEBUG,
 )
 log = structlog.get_logger()
+init_sentry(service_name=settings.SERVICE_NAME)
 
 
 @asynccontextmanager
