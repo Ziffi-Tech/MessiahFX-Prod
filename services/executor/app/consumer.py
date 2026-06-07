@@ -771,6 +771,7 @@ async def run(
     perp_exchange,
     oanda_client: httpx.AsyncClient | None,
     mt5_client: httpx.AsyncClient | None,
+    bybit_exchange=None,
 ) -> None:
     """
     Main consumer loop — runs for the lifetime of the service.
@@ -789,6 +790,7 @@ async def run(
         perp_exchange=perp_exchange,
         oanda_client=oanda_client,
         mt5_client=mt5_client,
+        bybit_exchange=bybit_exchange,
     )
 
     log.info(

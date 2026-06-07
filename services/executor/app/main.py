@@ -37,6 +37,7 @@ from mezna_shared.redis_client import get_redis, close_redis
 from .config import settings
 from .routes import health
 from .adapters import binance as binance_adapter
+from .adapters import bybit as bybit_adapter
 from . import consumer
 
 setup_logging(
@@ -118,6 +119,7 @@ async def lifespan(app: FastAPI):
     spot_exchange = None
     perp_exchange = None
     oanda_client = None
+    bybit_exchange = None
 
     if not settings.is_paper:
         if settings.BINANCE_API_KEY and settings.BINANCE_API_SECRET:
@@ -157,6 +159,23 @@ async def lifespan(app: FastAPI):
                 "executor.oanda_not_configured",
                 hint="OANDA_API_KEY/ACCOUNT_ID not set — Oanda orders will error",
             )
+
+        if settings.BYBIT_API_KEY and settings.BYBIT_API_SECRET:
+            bybit_exchange = bybit_adapter.make_exchange(
+                settings.BYBIT_API_KEY,
+                settings.BYBIT_API_SECRET,
+                settings.BYBIT_TESTNET,
+            )
+            log.info(
+                "executor.bybit_ready",
+                testnet=settings.BYBIT_TESTNET,
+                note="linear USDT perp exchange instance created",
+            )
+        else:
+            log.warning(
+                "executor.bybit_not_configured",
+                hint="BYBIT_API_KEY/SECRET not set — Bybit orders will error",
+            )
     else:
         log.info(
             "executor.paper_mode",
@@ -168,6 +187,7 @@ async def lifespan(app: FastAPI):
     app.state.perp_exchange = perp_exchange
     app.state.oanda_client = oanda_client
     app.state.mt5_client = mt5_client
+    app.state.bybit_exchange = bybit_exchange
 
     # ── Consumer task ─────────────────────────────────────────────────────────
     consumer_task = asyncio.create_task(
@@ -179,6 +199,7 @@ async def lifespan(app: FastAPI):
             perp_exchange=perp_exchange,
             oanda_client=oanda_client,
             mt5_client=mt5_client,
+            bybit_exchange=bybit_exchange,
         ),
         name="executor-consumer",
     )
@@ -204,6 +225,9 @@ async def lifespan(app: FastAPI):
     if perp_exchange is not None:
         await perp_exchange.close()
         log.info("executor.binance_perp_closed")
+    if bybit_exchange is not None:
+        await bybit_exchange.close()
+        log.info("executor.bybit_closed")
     if oanda_client is not None:
         await oanda_client.aclose()
         log.info("executor.oanda_client_closed")

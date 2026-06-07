@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     BINANCE_API_SECRET: str = ""
     BINANCE_TESTNET: bool = True
 
+    # Bybit (linear USDT perpetuals via CCXT)
+    BYBIT_API_KEY: str = ""
+    BYBIT_API_SECRET: str = ""
+    BYBIT_TESTNET: bool = True
+    BYBIT_TAKER_FEE_BPS: float = 5.5    # 0.055% taker (linear perp)
+
     # Oanda (v20 REST API)
     OANDA_API_KEY: str = ""
     OANDA_ACCOUNT_ID: str = ""
