@@ -20,7 +20,7 @@ from mezna_shared.db import get_engine, check_db_connection, dispose_engine
 from mezna_shared.redis_client import get_redis, close_redis
 
 from .config import settings
-from .routes import health
+from .routes import health, status
 from . import runner
 
 setup_logging(
@@ -100,6 +100,10 @@ app = FastAPI(
 )
 
 app.include_router(health.router, prefix="/health", tags=["health"])
+# Status + config routes registered at root: /configs, /overview, /rotation, etc.
+# The gateway proxy strips the service prefix before forwarding, so these are
+# reached via: GET /api/gateway/strategy/configs → service /configs
+app.include_router(status.router, tags=["strategy-status"])
 
 from mezna_shared.metrics import setup_metrics
 setup_metrics(app, service_name=settings.SERVICE_NAME)

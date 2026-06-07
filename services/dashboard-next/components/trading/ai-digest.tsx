@@ -1,28 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Bot, RefreshCw } from "lucide-react";
+import { useAiDigest } from "@/lib/hooks";
+import { useQueryClient } from "@tanstack/react-query";
+import { QK } from "@/lib/hooks";
 
 export function AiDigest() {
-  const [digest, setDigest] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [ts, setTs] = useState<string>("");
+  const { data, isLoading, isFetching } = useAiDigest();
+  const qc = useQueryClient();
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/gateway/ai-filter/digest", { cache: "no-store" });
-      if (res.ok) {
-        const json = await res.json();
-        setDigest(json.digest);
-        setTs(new Date(json.generated_at).toLocaleTimeString());
-      }
-    } catch { /* */ } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { load(); }, []);
+  const refresh = () => void qc.invalidateQueries({ queryKey: QK.digest });
 
   return (
     <div className="panel ai-panel p-4 space-y-3">
@@ -34,29 +21,34 @@ export function AiDigest() {
           </span>
         </div>
         <button
-          onClick={load}
-          disabled={loading}
+          onClick={refresh}
+          disabled={isFetching}
           className="p-1 rounded transition-colors hover:bg-[var(--bg-hover)] disabled:opacity-40"
           style={{ color: "var(--text-tertiary)" }}
+          aria-label="Refresh digest"
         >
-          <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
+          <RefreshCw size={11} className={isFetching ? "animate-spin" : ""} />
         </button>
       </div>
 
-      {loading ? (
+      {isLoading ? (
         <div className="space-y-2">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-3 rounded animate-pulse" style={{ background: "var(--bg-surface-2)", width: `${80 - i * 10}%` }} />
+          {[80, 70, 55].map((w) => (
+            <div
+              key={w}
+              className="h-3 rounded animate-pulse"
+              style={{ background: "var(--bg-surface-2)", width: `${w}%` }}
+            />
           ))}
         </div>
-      ) : digest ? (
+      ) : data?.digest ? (
         <>
           <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-            {digest}
+            {data.digest}
           </p>
-          {ts && (
+          {data.generated_at && (
             <p className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-              Generated {ts}
+              Generated {new Date(data.generated_at).toLocaleTimeString()}
             </p>
           )}
         </>

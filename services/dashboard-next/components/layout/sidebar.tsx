@@ -11,7 +11,6 @@ import {
   Shield,
   BookOpen,
   ScrollText,
-  BellRing,
   Settings,
   LogOut,
   Bot,

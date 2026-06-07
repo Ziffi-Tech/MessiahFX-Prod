@@ -20,7 +20,14 @@ export default function RagStudioPage() {
     if (res?.ok) setProfiles(await res.json());
   };
 
-  useEffect(() => { loadProfiles(); }, []);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const res = await fetch("/api/gateway/rag/strategies", { cache: "no-store" }).catch(() => null);
+      if (active && res?.ok) setProfiles(await res.json());
+    })();
+    return () => { active = false; };
+  }, []);
 
   const query = async () => {
     if (!question.trim()) return;

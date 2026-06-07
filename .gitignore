@@ -5,6 +5,9 @@
 # Secrets — NEVER commit
 .env
 *.env
+# All .env variants (e.g. .env.container, .env.migrate_tmp) — keep only the template
+.env.*
+!.env.example
 .env.local
 .env.production
 secrets/
@@ -87,3 +90,9 @@ uploads/
 
 # Claude Code internal state (conversation logs, task outputs)
 .claude/
+
+# Browser automation / Playwright MCP artifacts
+.playwright-mcp/
+
+# Stale nested project duplicate (has its own .git) — never track
+/MessiahFX-Prod/

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lock, Eye, EyeOff, TrendingUp } from "lucide-react";
+import { Lock, Eye, EyeOff } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();

@@ -267,8 +267,8 @@ _DAILY_PNL = text("""
     WHERE
         status = 'filled'
         AND filled_at IS NOT NULL
-        AND filled_at >= NOW() - (:days || ' days')::interval
-        AND (:strategy_type IS NULL OR strategy_type = :strategy_type)
+        AND filled_at >= NOW() - make_interval(days => :days)
+        AND (CAST(:strategy_type AS text) IS NULL OR strategy_type = CAST(:strategy_type AS text))
     GROUP BY 1, 2, 3
     ORDER BY 1 DESC, 2
 """)
@@ -314,8 +314,8 @@ _KELLY_STATS = text("""
     WHERE
         status = 'filled'
         AND filled_at IS NOT NULL
-        AND filled_at >= NOW() - (:days || ' days')::interval
-        AND (:strategy_type IS NULL OR strategy_type = :strategy_type)
+        AND filled_at >= NOW() - make_interval(days => :days)
+        AND (CAST(:strategy_type AS text) IS NULL OR strategy_type = CAST(:strategy_type AS text))
 """)
 
 
@@ -507,7 +507,7 @@ _STALE_TRADES = text("""
     FROM trades
     WHERE
         status IN ('pending', 'open')
-        AND opened_at < NOW() - (:stale_minutes || ' minutes')::interval
+        AND opened_at < NOW() - make_interval(mins => :stale_minutes)
     ORDER BY opened_at ASC
 """)
 

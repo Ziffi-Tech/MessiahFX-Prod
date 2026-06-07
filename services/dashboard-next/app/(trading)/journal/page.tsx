@@ -55,12 +55,12 @@ export default function JournalPage() {
       {pnl && (
         <div className="grid grid-cols-3 lg:grid-cols-6 gap-3">
           {[
-            { label: "Total P&L", v: `$${pnl.total_realized_pnl.toFixed(2)}`, positive: pnl.total_realized_pnl >= 0 },
-            { label: "Win Rate", v: `${(pnl.win_rate * 100).toFixed(1)}%`, neutral: true },
-            { label: "Profit Factor", v: pnl.profit_factor.toFixed(2), positive: pnl.profit_factor >= 1 },
-            { label: "Avg Win", v: `$${pnl.average_win.toFixed(2)}`, positive: true },
-            { label: "Avg Loss", v: `$${pnl.average_loss.toFixed(2)}`, positive: false },
-            { label: "Trades", v: String(pnl.total_trades), neutral: true },
+            { label: "Total P&L", v: `$${(pnl.total_realized_pnl ?? 0).toFixed(2)}`, positive: (pnl.total_realized_pnl ?? 0) >= 0 },
+            { label: "Win Rate", v: `${((pnl.win_rate ?? 0) * 100).toFixed(1)}%`, neutral: true },
+            { label: "Profit Factor", v: (pnl.profit_factor ?? 0).toFixed(2), positive: (pnl.profit_factor ?? 0) >= 1 },
+            { label: "Avg Win", v: `$${(pnl.average_win ?? 0).toFixed(2)}`, positive: true },
+            { label: "Avg Loss", v: `$${(pnl.average_loss ?? 0).toFixed(2)}`, positive: false },
+            { label: "Trades", v: String(pnl.total_trades ?? 0), neutral: true },
           ].map(s => (
             <div key={s.label} className="panel p-3 space-y-1">
               <p className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>{s.label}</p>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Settings, Key, Eye, EyeOff, Shield } from "lucide-react";
+import { Key, Eye, EyeOff, Shield } from "lucide-react";
 
 export default function SettingsPage() {
   const [showPass, setShowPass] = useState(false);

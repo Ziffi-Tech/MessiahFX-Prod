@@ -24,7 +24,7 @@ from mezna_shared.credential_store import CredentialStore
 from mezna_shared.metrics import setup_metrics
 
 from .config import settings
-from .routes import health, signals, control, credentials
+from .routes import health, signals, control, credentials, proxy
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -109,14 +109,19 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    # Must cover every method the proxied APIs serve. Strategy config updates
+    # use PATCH (/strategy/configs/{name}); credential management uses DELETE.
+    # Omitting them caused browser preflight (OPTIONS) to reject those calls.
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-app.include_router(health.router, prefix="/health", tags=["health"])
-app.include_router(signals.router, prefix="/api/v1/signals", tags=["signals"])
-app.include_router(control.router, prefix="/api/v1/control", tags=["control"])
-app.include_router(credentials.router, prefix="/api/v1/credentials", tags=["credentials"])
+app.include_router(health.router,       prefix="/health",            tags=["health"])
+app.include_router(signals.router,      prefix="/api/v1/signals",    tags=["signals"])
+app.include_router(control.router,      prefix="/api/v1/control",    tags=["control"])
+app.include_router(credentials.router,  prefix="/api/v1/credentials",tags=["credentials"])
+# Service reverse proxy — must be last (catch-all path)
+app.include_router(proxy.router,        tags=["proxy"])
 
 setup_metrics(app, service_name=settings.SERVICE_NAME)

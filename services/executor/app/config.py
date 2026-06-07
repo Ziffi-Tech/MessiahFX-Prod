@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     JOURNAL_URL: str = "http://journal:8006"
     RISK_URL: str = "http://risk:8003"
 
+    # Rotation + edge monitoring thresholds (must match strategy service config)
+    ROTATION_CONSECUTIVE_LOSS_THRESHOLD: int = 4
+    EDGE_MONITOR_WINDOW: int = 20
+    EDGE_BASELINE_WIN_RATE: float = 0.55
+    EDGE_DECAY_THRESHOLD: float = 0.15
+
     @property
     def mt5_configured(self) -> bool:
         return bool(self.MT5_BRIDGE_URL)

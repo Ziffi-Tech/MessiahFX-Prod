@@ -1,11 +1,7 @@
 import { Sidebar } from "@/components/layout/sidebar";
-import { Topbar } from "@/components/layout/topbar";
+import { Topbar }  from "@/components/layout/topbar";
 
-export default function TradingLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function TradingLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-dvh overflow-hidden">
       <Sidebar />

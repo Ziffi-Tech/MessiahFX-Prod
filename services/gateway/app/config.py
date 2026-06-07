@@ -21,10 +21,14 @@ class Settings(BaseSettings):
     TRADING_MODE: str = "paper"
 
     # ── Internal service URLs ─────────────────────────────────────────────────
-    RISK_URL: str = "http://risk:8003"
-    EXECUTOR_URL: str = "http://executor:8004"
-    JOURNAL_URL: str = "http://journal:8006"
-    NOTIFICATIONS_URL: str = "http://notifications:8007"
+    RISK_URL:          str = "http://mezna-risk:8003"
+    EXECUTOR_URL:      str = "http://mezna-executor:8004"
+    JOURNAL_URL:       str = "http://mezna-journal:8006"
+    NOTIFICATIONS_URL: str = "http://mezna-notifications:8007"
+    STRATEGY_URL:      str = "http://mezna-strategy:8002"
+    BACKTEST_URL:      str = "http://mezna-backtest:8008"
+    AI_FILTER_URL:     str = "http://mezna-ai-filter:8005"
+    MARKET_DATA_URL:   str = "http://mezna-market-data:8001"
 
     # ── Credential encryption ─────────────────────────────────────────────────
     # REQUIRED. Generate with:
@@ -33,8 +37,15 @@ class Settings(BaseSettings):
     CREDENTIAL_ENCRYPTION_KEY: str = ""
 
     # ── CORS ──────────────────────────────────────────────────────────────────
-    # Restrict in production — dashboard origin only
-    CORS_ORIGINS: list[str] = ["http://localhost:8501", "http://dashboard:8501"]
+    # Restrict in production — dashboard origin only.
+    # localhost:3000/3001 are for Next.js dev server; 8501 for Streamlit (legacy).
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:8501",
+        "http://dashboard:8501",
+        "http://dashboard-next:3000",
+    ]
 
     @property
     def credentials_enabled(self) -> bool:

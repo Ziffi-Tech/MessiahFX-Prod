@@ -52,6 +52,16 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from mezna_shared.redis_client import RedisKeys, StreamNames
+from mezna_shared.regime_map import preferred_for_regime
+from .adapters import OrderRequest, OrderResult
+from .adapters import paper as paper_adapter
+from .adapters import binance as binance_adapter
+from .adapters import oanda as oanda_adapter
+from .adapters import mt5_adapter
+from . import db as trade_db
+from .config import Settings, settings
+
+log = structlog.get_logger()
 
 
 async def _notify(redis: Redis, event: str, **kwargs) -> None:
@@ -68,15 +78,185 @@ async def _notify(redis: Redis, event: str, **kwargs) -> None:
         await redis.rpush(RedisKeys.NOTIFICATION_QUEUE, payload)
     except Exception:
         pass  # Never let notification failures affect order execution
-from .adapters import OrderRequest, OrderResult
-from .adapters import paper as paper_adapter
-from .adapters import binance as binance_adapter
-from .adapters import oanda as oanda_adapter
-from .adapters import mt5_adapter
-from . import db as trade_db
-from .config import Settings
 
-log = structlog.get_logger()
+
+# ── Rotation + edge decay recording (direct Redis writes, no cross-service import) ──
+
+_ROTATION_LOSSES_KEY   = "strategy:consecutive_losses:{name}"
+_ROTATION_DEGRADED_KEY = "strategy:degraded:{name}"
+_ROTATION_PREFERRED    = "strategy:rotation:preferred"
+_EDGE_OUTCOMES_KEY     = "edge:outcomes:{name}"
+_EDGE_WIN_RATE_KEY     = "edge:win_rate:{name}"
+_EDGE_DECAYED_KEY      = "edge:decayed:{name}"
+_STRATEGY_AVG_WIN_KEY  = "strategy:avg_win:{name}"
+_STRATEGY_AVG_LOSS_KEY = "strategy:avg_loss:{name}"
+
+# Per-strategy drawdown tracking
+_STRAT_PNL_KEY         = "strategy:cum_pnl:{name}"
+_STRAT_PEAK_KEY        = "strategy:peak_pnl:{name}"
+_STRAT_DRAWDOWN_KEY    = "strategy:drawdown_pct:{name}"
+
+_EDGE_WINDOW           = settings.EDGE_MONITOR_WINDOW
+_EDGE_BASELINE         = settings.EDGE_BASELINE_WIN_RATE
+_EDGE_DECAY_THRESHOLD  = settings.EDGE_DECAY_THRESHOLD
+_EDGE_MIN_SAMPLE       = 10
+_ROTATION_THRESHOLD    = settings.ROTATION_CONSECUTIVE_LOSS_THRESHOLD
+_ROTATION_TTL          = 14400   # 4 h degraded TTL
+_EDGE_TTL              = 86400   # 1 day
+
+
+async def _record_execution_outcome(
+    redis: Redis,
+    strategy: str,
+    won: bool,
+    proxy_pnl_usd: float,
+    position_usd: float,
+) -> None:
+    """
+    Record trade outcome to rotation engine, edge monitor, and drawdown tracker.
+
+    Runs fire-and-forget after successful order processing.
+    All exceptions are caught — this must never interrupt execution.
+
+    Args:
+        strategy:       strategy name
+        won:            True if all legs filled, False on any execution error
+        proxy_pnl_usd:  Expected net P&L proxy (net_edge_bps * position_usd / 10000)
+        position_usd:   Notional position size used for sizing P&L proxy
+    """
+    try:
+        # ── 1. Rotation engine (consecutive loss counter) ──────────────────────
+        loss_key = _ROTATION_LOSSES_KEY.format(name=strategy)
+        degraded_key = _ROTATION_DEGRADED_KEY.format(name=strategy)
+
+        if won:
+            await redis.delete(loss_key)
+            await redis.delete(degraded_key)
+        else:
+            count = await redis.incr(loss_key)
+            await redis.expire(loss_key, _EDGE_TTL)
+
+            if count >= _ROTATION_THRESHOLD:
+                await redis.set(degraded_key, "1", ex=_ROTATION_TTL)
+                # Prefer the best alternative from regime map (read current regime)
+                regime_raw = await redis.get("ai:regime:current") or b"unknown"
+                regime = regime_raw.decode() if isinstance(regime_raw, bytes) else "unknown"
+                await _update_rotation_preferred(redis, strategy, regime)
+                log.warning(
+                    "executor.rotation_triggered",
+                    strategy=strategy,
+                    consecutive_losses=count,
+                    regime=regime,
+                )
+
+        # ── 2. Edge decay monitor (rolling win rate) ───────────────────────────
+        edge_key = _EDGE_OUTCOMES_KEY.format(name=strategy)
+        await redis.rpush(edge_key, "1" if won else "0")
+        await redis.ltrim(edge_key, -_EDGE_WINDOW, -1)
+        await redis.expire(edge_key, _EDGE_TTL)
+
+        raw = await redis.lrange(edge_key, 0, -1)
+        if raw:
+            outcomes = [int(o) for o in raw]
+            win_rate = sum(outcomes) / len(outcomes)
+            await redis.set(
+                _EDGE_WIN_RATE_KEY.format(name=strategy), str(round(win_rate, 4)), ex=_EDGE_TTL
+            )
+            already_decayed = bool(await redis.exists(_EDGE_DECAYED_KEY.format(name=strategy)))
+            below = win_rate < (_EDGE_BASELINE - _EDGE_DECAY_THRESHOLD)
+
+            if below and not already_decayed and len(outcomes) >= _EDGE_MIN_SAMPLE:
+                await redis.set(_EDGE_DECAYED_KEY.format(name=strategy), "1", ex=_ROTATION_TTL)
+                await _notify(
+                    redis,
+                    "edge.decay_detected",
+                    strategy=strategy,
+                    win_rate=round(win_rate, 4),
+                    window_size=len(outcomes),
+                )
+            elif not below and already_decayed:
+                await redis.delete(_EDGE_DECAYED_KEY.format(name=strategy))
+
+        # ── 3. Rolling avg win / avg loss (for Kelly sizing) ──────────────────
+        if proxy_pnl_usd != 0:
+            win_key  = _STRATEGY_AVG_WIN_KEY.format(name=strategy)
+            loss_key2 = _STRATEGY_AVG_LOSS_KEY.format(name=strategy)
+            if proxy_pnl_usd > 0:
+                # Exponential moving average: new_avg = 0.9 * old + 0.1 * new
+                old_raw = await redis.get(win_key)
+                old = float(old_raw) if old_raw else proxy_pnl_usd
+                await redis.set(win_key, str(round(0.9 * old + 0.1 * proxy_pnl_usd, 4)), ex=_EDGE_TTL)
+            else:
+                old_raw = await redis.get(loss_key2)
+                old = float(old_raw) if old_raw else abs(proxy_pnl_usd)
+                await redis.set(
+                    loss_key2,
+                    str(round(0.9 * old + 0.1 * abs(proxy_pnl_usd), 4)),
+                    ex=_EDGE_TTL,
+                )
+
+        # ── 4. Per-strategy drawdown tracking ─────────────────────────────────
+        pnl_key  = _STRAT_PNL_KEY.format(name=strategy)
+        peak_key = _STRAT_PEAK_KEY.format(name=strategy)
+        dd_key   = _STRAT_DRAWDOWN_KEY.format(name=strategy)
+
+        old_cum_raw = await redis.get(pnl_key)
+        old_cum = float(old_cum_raw) if old_cum_raw else 0.0
+        new_cum = old_cum + proxy_pnl_usd
+        await redis.set(pnl_key, str(round(new_cum, 4)), ex=_EDGE_TTL)
+
+        old_peak_raw = await redis.get(peak_key)
+        old_peak = float(old_peak_raw) if old_peak_raw else 0.0
+        new_peak = max(old_peak, new_cum)
+        await redis.set(peak_key, str(round(new_peak, 4)), ex=_EDGE_TTL)
+
+        if new_peak > 0:
+            dd_pct = (new_peak - new_cum) / new_peak * 100.0
+        elif new_peak < 0:
+            dd_pct = 0.0  # All losses, no peak to draw from
+        else:
+            dd_pct = 0.0
+        await redis.set(dd_key, str(round(dd_pct, 4)), ex=_EDGE_TTL)
+
+        log.debug(
+            "executor.outcome_recorded",
+            strategy=strategy,
+            won=won,
+            proxy_pnl=round(proxy_pnl_usd, 4),
+            strategy_drawdown_pct=round(dd_pct, 2),
+        )
+
+    except Exception as exc:
+        # Outcome recording is advisory — never interrupt the trade flow
+        log.error("executor.outcome_recording_failed", strategy=strategy, error=str(exc))
+
+
+async def _update_rotation_preferred(redis: Redis, failed: str, regime: str) -> None:
+    """
+    Select the best non-degraded alternative for the current regime
+    and set it as the rotation preferred strategy.
+    """
+    candidates = preferred_for_regime(regime)
+
+    for candidate in candidates:
+        if candidate == failed:
+            continue
+        degraded = bool(await redis.exists(_ROTATION_DEGRADED_KEY.format(name=candidate)))
+        if degraded:
+            continue
+        state = await redis.hgetall(f"strategy:state:{candidate}")
+        enabled = state.get(b"enabled", b"0") == b"1" or state.get("enabled", "0") == "1"
+        if enabled:
+            await redis.set(_ROTATION_PREFERRED, candidate, ex=_ROTATION_TTL)
+            log.info("executor.rotation_preferred_set", preferred=candidate, regime=regime)
+            await _notify(
+                redis,
+                "strategy.rotation.triggered",
+                failed_strategy=failed,
+                rotating_to=candidate,
+                regime=regime,
+            )
+            return
 
 _CONSUMER_GROUP = "executor"
 _CONSUMER_NAME = "executor-1"
@@ -520,6 +700,27 @@ async def _process(
         fills_ok=fills_ok,
         all_filled=fills_ok == fills_attempted,
     )
+
+    # ── Record outcome to rotation engine, edge monitor, drawdown tracker ──────
+    if fills_attempted > 0 and strategy_type not in ("unknown", ""):
+        won = fills_ok == fills_attempted
+        # Proxy P&L: expected edge × position notional (paper proxy; upgraded in Phase 4)
+        net_edge_bps = float(payload.get("net_edge_bps") or 0.0)
+        fee_bps      = float(payload.get("fee_cost_bps") or 0.0)
+        pos_usd      = settings.position_usd
+        if won:
+            proxy_pnl = (net_edge_bps / 10_000) * pos_usd
+        else:
+            # Execution failure: we incurred friction without capturing edge
+            proxy_pnl = -(fee_bps / 10_000) * pos_usd
+
+        await _record_execution_outcome(
+            redis=redis,
+            strategy=strategy_type,
+            won=won,
+            proxy_pnl_usd=proxy_pnl,
+            position_usd=pos_usd,
+        )
 
 
 # ── Consumer loop ─────────────────────────────────────────────────────────────

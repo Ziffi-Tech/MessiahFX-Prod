@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Trade, PnLSummary } from "@/types/api";
-import { TrendingUp, TrendingDown, Activity } from "lucide-react";
+import { Activity } from "lucide-react";
 
 export default function PositionsPage() {
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -25,10 +25,10 @@ export default function PositionsPage() {
   }, []);
 
   const stats = [
-    { label: "Total P&L", value: pnl ? `$${pnl.total_realized_pnl.toFixed(2)}` : "—", positive: (pnl?.total_realized_pnl ?? 0) >= 0 },
-    { label: "Win Rate", value: pnl ? `${(pnl.win_rate * 100).toFixed(1)}%` : "—", neutral: true },
-    { label: "Profit Factor", value: pnl ? pnl.profit_factor.toFixed(2) : "—", positive: (pnl?.profit_factor ?? 0) >= 1 },
-    { label: "Max Drawdown", value: pnl ? `${pnl.max_drawdown_pct.toFixed(2)}%` : "—", positive: false },
+    { label: "Total P&L", value: pnl ? `$${(pnl.total_realized_pnl ?? 0).toFixed(2)}` : "—", positive: (pnl?.total_realized_pnl ?? 0) >= 0 },
+    { label: "Win Rate", value: pnl ? `${((pnl.win_rate ?? 0) * 100).toFixed(1)}%` : "—", neutral: true },
+    { label: "Profit Factor", value: pnl ? (pnl.profit_factor ?? 0).toFixed(2) : "—", positive: (pnl?.profit_factor ?? 0) >= 1 },
+    { label: "Max Drawdown", value: pnl ? `${(pnl.max_drawdown_pct ?? 0).toFixed(2)}%` : "—", positive: false },
   ];
 
   return (

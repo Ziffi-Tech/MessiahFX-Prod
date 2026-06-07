@@ -89,8 +89,10 @@ app = FastAPI(
 )
 
 app.include_router(health.router, prefix="/health", tags=["health"])
-app.include_router(backtest.router, prefix="/backtest", tags=["backtest"])
-app.include_router(compare.router, prefix="/backtest", tags=["compare"])
-app.include_router(regime_backtest.router, prefix="/backtest", tags=["regime-backtest"])
+# Backtest routes at root: /funding-arb, /stat-arb, /symbols, etc.
+# Gateway proxy strips the "backtest" prefix before forwarding.
+app.include_router(backtest.router,         tags=["backtest"])
+app.include_router(compare.router,          tags=["compare"])
+app.include_router(regime_backtest.router,  tags=["regime-backtest"])
 
 setup_metrics(app, service_name=settings.SERVICE_NAME)
