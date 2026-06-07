@@ -59,10 +59,7 @@ from mezna_shared.redis_client import RedisKeys, StreamNames
 from mezna_shared.regime_map import preferred_for_regime
 from mezna_shared.kelly import get_strategy_kelly_fraction, kelly_position_usd
 from .adapters import OrderRequest, OrderResult
-from .adapters import paper as paper_adapter
-from .adapters import binance as binance_adapter
-from .adapters import oanda as oanda_adapter
-from .adapters import mt5_adapter
+from .adapters.registry import build_registry, resolve_adapter
 from . import db as trade_db
 from .config import Settings, settings
 
@@ -492,28 +489,21 @@ def _build_order_plan(payload: dict) -> list[dict]:
 
 # ── Adapter routing ───────────────────────────────────────────────────────────
 
-def _fee_bps(venue: str, settings: Settings) -> float:
-    """Return the taker fee in basis points for the given venue."""
-    if venue == "oanda":
-        return settings.OANDA_SPREAD_BPS
-    return settings.BINANCE_TAKER_FEE_BPS
-
-
 async def _execute_leg(
     leg: dict,
     quantity: float,
     opportunity_id: str | None,
     payload: dict,
     settings: Settings,
-    redis: Redis,
-    spot_exchange,
-    perp_exchange,
-    oanda_client: httpx.AsyncClient | None,
-    mt5_client: httpx.AsyncClient | None,
+    adapters: dict,
 ) -> tuple[OrderRequest, OrderResult]:
     """
-    Build an OrderRequest and route it to the correct adapter.
+    Build an OrderRequest and route it through the venue adapter registry.
     Returns (order, result) — never raises.
+
+    Routing is fully data-driven: resolve_adapter() picks the adapter for the
+    leg's venue (or the paper adapter in paper mode). Adding a venue is a registry
+    change only — this function never grows a new branch.
     """
     client_order_id = str(uuid.uuid4())
     venue = leg["venue"]
@@ -533,47 +523,10 @@ async def _execute_leg(
     )
 
     try:
-        if settings.is_paper:
-            result = await paper_adapter.execute(
-                order=order,
-                redis=redis,
-                fee_bps=_fee_bps(venue, settings),
-            )
-
-        elif venue == "binance":
-            if spot_exchange is None or perp_exchange is None:
-                raise RuntimeError("Binance exchange instances not initialised")
-            result = await binance_adapter.execute(
-                order=order,
-                spot_exchange=spot_exchange,
-                perp_exchange=perp_exchange,
-                fee_bps=settings.BINANCE_TAKER_FEE_BPS,
-            )
-
-        elif venue == "oanda":
-            if oanda_client is None:
-                raise RuntimeError("Oanda HTTP client not initialised")
-            result = await oanda_adapter.execute(
-                order=order,
-                client=oanda_client,
-                api_key=settings.OANDA_API_KEY,
-                account_id=settings.OANDA_ACCOUNT_ID,
-                base_url=settings.oanda_rest_url,
-            )
-
-        elif venue == "mt5":
-            if mt5_client is None:
-                raise RuntimeError("MT5 HTTP client not initialised — check MT5_BRIDGE_URL")
-            result = await mt5_adapter.execute(
-                order=order,
-                client=mt5_client,
-                bridge_url=settings.MT5_BRIDGE_URL,
-                api_key=settings.MT5_BRIDGE_API_KEY,
-                spread_bps=settings.MT5_SPREAD_BPS,
-            )
-
-        else:
+        adapter = resolve_adapter(adapters, venue, is_paper=settings.is_paper)
+        if adapter is None:
             raise ValueError(f"Unknown venue: {venue!r}")
+        result = await adapter.execute(order)
 
     except Exception as exc:
         log.error(
@@ -607,10 +560,7 @@ async def _process(
     redis: Redis,
     db_engine: AsyncEngine,
     settings: Settings,
-    spot_exchange,
-    perp_exchange,
-    oanda_client: httpx.AsyncClient | None,
-    mt5_client: httpx.AsyncClient | None,
+    adapters: dict,
 ) -> None:
     """
     Process one execution-queue message end-to-end.
@@ -724,18 +674,14 @@ async def _process(
             fills_attempted += 1
             continue
 
-        # Submit order via adapter
+        # Submit order via the venue adapter registry
         order, result = await _execute_leg(
             leg=leg,
             quantity=quantity,
             opportunity_id=opportunity_id,
             payload=payload,
             settings=settings,
-            redis=redis,
-            spot_exchange=spot_exchange,
-            perp_exchange=perp_exchange,
-            oanda_client=oanda_client,
-            mt5_client=mt5_client,
+            adapters=adapters,
         )
         fills_attempted += 1
 
@@ -834,6 +780,17 @@ async def run(
     On parse or logic errors, message IS ACK'd (won't self-correct on replay).
     """
     await _ensure_group(redis)
+
+    # Build the venue -> adapter registry once from the injected clients.
+    adapters = build_registry(
+        settings=settings,
+        redis=redis,
+        spot_exchange=spot_exchange,
+        perp_exchange=perp_exchange,
+        oanda_client=oanda_client,
+        mt5_client=mt5_client,
+    )
+
     log.info(
         "executor.consumer_started",
         group=_CONSUMER_GROUP,
@@ -842,6 +799,7 @@ async def run(
         position_usd=settings.position_usd,
         kelly_enabled=settings.KELLY_ENABLED,
         account_equity_usd=settings.ACCOUNT_EQUITY_USD,
+        venues=sorted(adapters),
     )
 
     while True:
@@ -874,10 +832,7 @@ async def run(
                         redis=redis,
                         db_engine=db_engine,
                         settings=settings,
-                        spot_exchange=spot_exchange,
-                        perp_exchange=perp_exchange,
-                        oanda_client=oanda_client,
-                        mt5_client=mt5_client,
+                        adapters=adapters,
                     )
                     ack = True  # Safe to ACK — processing complete or irrecoverable error
 
