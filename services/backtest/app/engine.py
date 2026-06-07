@@ -13,7 +13,8 @@ Simulation model:
 Metrics returned:
   total_trades, winning_trades, losing_trades, win_rate
   total_pnl_usd, total_fees_usd, net_pnl_usd
-  max_drawdown_pct, sharpe_ratio (annualised, daily returns)
+  max_drawdown_pct, sharpe_ratio / sortino_ratio / calmar_ratio
+    (annualised; via empyrical, falls back to a hand-rolled Sharpe)
   avg_hold_candles, trade_log (list of individual trades)
 
 Funding Arb simulation:
@@ -36,6 +37,13 @@ from typing import Any
 
 import numpy as np
 import structlog
+
+try:
+    import empyrical
+    _HAS_EMPYRICAL = True
+except Exception:  # empyrical is optional — engine degrades to a hand-rolled Sharpe
+    empyrical = None
+    _HAS_EMPYRICAL = False
 
 from .config import Settings
 
@@ -77,6 +85,8 @@ class BacktestResult:
     net_pnl_usd: float = 0.0
     max_drawdown_pct: float = 0.0
     sharpe_ratio: float = 0.0
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
     avg_hold_candles: float = 0.0
     total_return_pct: float = 0.0
     trade_log: list[dict] = field(default_factory=list)
@@ -85,6 +95,40 @@ class BacktestResult:
 
 
 # ── Metrics helpers ───────────────────────────────────────────────────────────
+
+def _safe_metric(value: Any, default: float = 0.0) -> float:
+    """Coerce an empyrical result (which may be nan/inf) to a finite float."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
+
+
+def _risk_ratios(returns: list[float]) -> dict:
+    """
+    Annualised Sharpe / Sortino / Calmar from a per-period return series.
+
+    Uses empyrical (period='daily', 252 annualisation) for standard, well-tested
+    formulas. Falls back to a hand-rolled Sharpe (Sortino/Calmar 0) if empyrical
+    is unavailable so the engine still runs in minimal environments.
+    """
+    if len(returns) < 2:
+        return {"sharpe_ratio": 0.0, "sortino_ratio": 0.0, "calmar_ratio": 0.0}
+
+    if _HAS_EMPYRICAL:
+        arr = np.asarray(returns, dtype=float)
+        return {
+            "sharpe_ratio":  round(_safe_metric(empyrical.sharpe_ratio(arr)), 4),
+            "sortino_ratio": round(_safe_metric(empyrical.sortino_ratio(arr)), 4),
+            "calmar_ratio":  round(_safe_metric(empyrical.calmar_ratio(arr)), 4),
+        }
+
+    mu = float(np.mean(returns))
+    sigma = float(np.std(returns, ddof=1))
+    sharpe = (mu / sigma * math.sqrt(252)) if sigma > 0 else 0.0
+    return {"sharpe_ratio": round(sharpe, 4), "sortino_ratio": 0.0, "calmar_ratio": 0.0}
+
 
 def _compute_metrics(
     trade_records: list[TradeRecord],
@@ -104,6 +148,8 @@ def _compute_metrics(
             "net_pnl_usd": 0.0,
             "max_drawdown_pct": 0.0,
             "sharpe_ratio": 0.0,
+            "sortino_ratio": 0.0,
+            "calmar_ratio": 0.0,
             "avg_hold_candles": 0.0,
             "total_return_pct": 0.0,
         }
@@ -130,13 +176,8 @@ def _compute_metrics(
         daily_returns.append((equity - prev_equity) / prev_equity if prev_equity > 0 else 0.0)
         prev_equity = equity
 
-    # Sharpe ratio (annualised, assuming 252 trading days, simplified)
-    if len(daily_returns) > 1:
-        mu = np.mean(daily_returns)
-        sigma = np.std(daily_returns, ddof=1)
-        sharpe = (mu / sigma * math.sqrt(252)) if sigma > 0 else 0.0
-    else:
-        sharpe = 0.0
+    # Risk-adjusted ratios (annualised) via empyrical — Sharpe / Sortino / Calmar
+    ratios = _risk_ratios(daily_returns)
 
     avg_hold = sum(t.hold_candles for t in trade_records) / len(trade_records)
     total_return_pct = (total_net / capital_usd) * 100 if capital_usd > 0 else 0.0
@@ -150,7 +191,9 @@ def _compute_metrics(
         "total_fees_usd": round(sum(t.fee_usd for t in trade_records), 4),
         "net_pnl_usd": round(total_net, 4),
         "max_drawdown_pct": round(max_dd * 100, 4),
-        "sharpe_ratio": round(sharpe, 4),
+        "sharpe_ratio": ratios["sharpe_ratio"],
+        "sortino_ratio": ratios["sortino_ratio"],
+        "calmar_ratio": ratios["calmar_ratio"],
         "avg_hold_candles": round(avg_hold, 2),
         "total_return_pct": round(total_return_pct, 4),
     }
