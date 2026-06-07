@@ -338,12 +338,14 @@ async def kelly_stats(
         total_fees_usd       — sum of all fees (USD)
         win_rate             — winning_trades / (winning + losing)
         edge_ratio           — avg_win_usd / avg_loss_usd (0 when no losing trades)
-        realized_pnl_populated — False until Phase 7 position-close tracking is live.
-                                  When False, avg_win/loss will be 0 — do not use for Kelly.
+        realized_pnl_populated — True once any position has been closed (realized P&L
+                                  is now tracked per fill via average-cost accounting,
+                                  migration 003). False only before the first close,
+                                  when avg_win/loss are still 0 — do not use for Kelly.
 
-    NOTE: realized_pnl is always 0 until the position-close logic in Phase 7 is
-    implemented.  Callers MUST check realized_pnl_populated before using avg_win_usd
-    and avg_loss_usd for Kelly computation.
+    Realized P&L is net of fees and populated by the executor as positions are
+    reduced/closed. Callers SHOULD still check realized_pnl_populated before using
+    avg_win_usd / avg_loss_usd, since both are 0 until the first round trip closes.
     """
     params = {"days": days, "strategy_type": strategy_type}
     async with get_async_session(db_engine) as session:
@@ -498,6 +500,50 @@ async def list_risk_events(
         rows = await session.execute(_SELECT_RISK_EVENTS, params)
         count_row = await session.execute(_COUNT_RISK_EVENTS, params)
     return [_row_to_dict(r) for r in rows], (count_row.scalar() or 0)
+
+
+# ── Positions ─────────────────────────────────────────────────────────────────
+
+_SELECT_POSITIONS = text("""
+    SELECT
+        venue, symbol, strategy_type, paper_mode,
+        net_qty, avg_price, open_fees, realized_pnl, fee_currency,
+        status, opened_at, closed_at, updated_at
+    FROM positions
+    WHERE
+        (:status        IS NULL OR status = :status)
+        AND (:strategy_type IS NULL OR strategy_type = :strategy_type)
+        AND (:paper_mode    IS NULL OR paper_mode = :paper_mode::boolean)
+    ORDER BY (status = 'open') DESC, updated_at DESC
+    LIMIT :limit OFFSET :offset
+""")
+
+
+async def list_positions(
+    db_engine: AsyncEngine,
+    *,
+    status: str | None = None,
+    strategy_type: str | None = None,
+    paper_mode: bool | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """
+    Return positions (net exposure + cumulative realized P&L) per trading key.
+
+    Defaults to all; pass status='open' for live exposure only. Summing
+    realized_pnl across all positions equals the trades-table realized P&L total.
+    """
+    params = {
+        "status": status,
+        "strategy_type": strategy_type,
+        "paper_mode": str(paper_mode).lower() if paper_mode is not None else None,
+        "limit": min(limit, 500),
+        "offset": offset,
+    }
+    async with get_async_session(db_engine) as session:
+        rows = await session.execute(_SELECT_POSITIONS, params)
+    return [_row_to_dict(r) for r in rows]
 
 
 # ── Reconciliation helpers ────────────────────────────────────────────────────

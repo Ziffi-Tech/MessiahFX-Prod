@@ -20,6 +20,7 @@ Routes:
   GET /opportunities/{id}        — single opportunity + linked trades
   GET /pnl/daily                 — daily activity rows (N days)
   GET /pnl/summary               — rolled-up totals
+  GET /pnl/positions             — net positions + realized P&L per key
   GET /audit                     — audit log entries
   GET /audit/risk-events         — risk events (halts, cooldowns)
 """
