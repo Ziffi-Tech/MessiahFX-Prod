@@ -48,8 +48,18 @@ from redis.asyncio import Redis
 
 from ..config import Settings
 from ..publisher import publish_opportunity
-from .base import read_tick_cache, read_latest_tick, is_halted
+from .base import read_tick_cache, read_latest_tick, is_halted, read_ohlcv
+from mezna_shared.bars import ohlcv_columns
 from mezna_shared.schemas.opportunity import OpportunityCreate
+
+try:
+    import pandas as pd
+    import pandas_ta_classic as ta
+    _HAS_PANDAS_TA = True
+except Exception:  # pandas-ta optional — bar mode falls back to tick detection
+    pd = None
+    ta = None
+    _HAS_PANDAS_TA = False
 
 log = structlog.get_logger()
 
@@ -154,6 +164,81 @@ def _analyse(
     return None
 
 
+def _analyse_bars(
+    bars: list[dict],
+    rsi_period: int,
+    rsi_oversold: float,
+    rsi_overbought: float,
+    bb_period: int,
+    bb_std_mult: float,
+) -> Optional[dict]:
+    """
+    Bar-based RSI + Bollinger confluence via pandas-ta on OHLCV closes.
+
+    Same return shape as _analyse so run_once is unchanged. Returns None when
+    pandas-ta is unavailable, there are too few bars, or indicators are invalid.
+    """
+    need = max(rsi_period, bb_period) + 2
+    if not _HAS_PANDAS_TA or len(bars) < need:
+        return None
+
+    cols = ohlcv_columns(bars)
+    df = pd.DataFrame({"close": [float(x) for x in cols["close"]]})
+
+    rsi_series = ta.rsi(df["close"], length=rsi_period)
+    bbands = ta.bbands(df["close"], length=bb_period, std=bb_std_mult)
+    if rsi_series is None or bbands is None or bbands.empty:
+        return None
+
+    rsi_clean = rsi_series.dropna()
+    if rsi_clean.empty:
+        return None
+    rsi_val = float(rsi_clean.iloc[-1])
+
+    def _band(prefix: str) -> Optional[float]:
+        matches = [c for c in bbands.columns if c.startswith(prefix)]
+        if not matches:
+            return None
+        val = bbands[matches[0]].iloc[-1]
+        return float(val) if val == val else None  # skip NaN
+
+    upper, middle, lower = _band("BBU"), _band("BBM"), _band("BBL")
+    if None in (upper, middle, lower) or not np.isfinite(rsi_val):
+        return None
+
+    current = float(df["close"].iloc[-1])
+
+    # ── Long: oversold + price at/below lower band ────────────────────────────
+    if rsi_val < rsi_oversold and current <= lower:
+        target_bps = ((middle - current) / current) * 10_000
+        return {
+            "direction": "buy",
+            "rsi": round(rsi_val, 2),
+            "upper_band": round(upper, 8),
+            "middle_band": round(middle, 8),
+            "lower_band": round(lower, 8),
+            "current_price": current,
+            "expected_revert_bps": round(target_bps, 4),
+            "confluence": "rsi_oversold+lower_band",
+        }
+
+    # ── Short: overbought + price at/above upper band ─────────────────────────
+    if rsi_val > rsi_overbought and current >= upper:
+        target_bps = ((current - middle) / current) * 10_000
+        return {
+            "direction": "sell",
+            "rsi": round(rsi_val, 2),
+            "upper_band": round(upper, 8),
+            "middle_band": round(middle, 8),
+            "lower_band": round(lower, 8),
+            "current_price": current,
+            "expected_revert_bps": round(target_bps, 4),
+            "confluence": "rsi_overbought+upper_band",
+        }
+
+    return None
+
+
 class MeanReversionScalpStrategy:
     """RSI + Bollinger Band confluence mean reversion for ranging markets."""
 
@@ -182,18 +267,32 @@ class MeanReversionScalpStrategy:
         fee_bps = self._settings.MR_FEE_BPS
         min_edge = self._settings.MR_MIN_EDGE_BPS
 
+        use_bars = self._settings.MR_USE_BARS and _HAS_PANDAS_TA
+        bar_seconds = self._settings.MR_BAR_SECONDS
+
         for symbol in self._settings.mean_reversion_symbol_list:
             venue = "binance" if "USDT" in symbol else "oanda"
-            ticks = await read_tick_cache(redis, venue, symbol, 80)
 
-            signal = _analyse(
-                ticks,
-                rsi_period=self._settings.MR_RSI_PERIOD,
-                rsi_oversold=self._settings.MR_RSI_OVERSOLD,
-                rsi_overbought=self._settings.MR_RSI_OVERBOUGHT,
-                bb_period=self._settings.MR_BB_PERIOD,
-                bb_std_mult=self._settings.MR_BB_STD_MULT,
-            )
+            if use_bars:
+                bars = await read_ohlcv(redis, venue, symbol, bar_seconds, max_ticks=500)
+                signal = _analyse_bars(
+                    bars,
+                    rsi_period=self._settings.MR_RSI_PERIOD,
+                    rsi_oversold=self._settings.MR_RSI_OVERSOLD,
+                    rsi_overbought=self._settings.MR_RSI_OVERBOUGHT,
+                    bb_period=self._settings.MR_BB_PERIOD,
+                    bb_std_mult=self._settings.MR_BB_STD_MULT,
+                )
+            else:
+                ticks = await read_tick_cache(redis, venue, symbol, 80)
+                signal = _analyse(
+                    ticks,
+                    rsi_period=self._settings.MR_RSI_PERIOD,
+                    rsi_oversold=self._settings.MR_RSI_OVERSOLD,
+                    rsi_overbought=self._settings.MR_RSI_OVERBOUGHT,
+                    bb_period=self._settings.MR_BB_PERIOD,
+                    bb_std_mult=self._settings.MR_BB_STD_MULT,
+                )
 
             if signal is None:
                 continue

@@ -46,8 +46,18 @@ from redis.asyncio import Redis
 
 from ..config import Settings
 from ..publisher import publish_opportunity
-from .base import read_tick_cache, read_latest_tick, is_halted
+from .base import read_tick_cache, read_latest_tick, is_halted, read_ohlcv
+from mezna_shared.bars import ohlcv_columns
 from mezna_shared.schemas.opportunity import OpportunityCreate
+
+try:
+    import pandas as pd
+    import pandas_ta_classic as ta
+    _HAS_PANDAS_TA = True
+except Exception:  # pandas-ta optional — bar mode falls back to tick detection
+    pd = None
+    ta = None
+    _HAS_PANDAS_TA = False
 
 log = structlog.get_logger()
 
@@ -136,6 +146,63 @@ def _analyse_momentum(
     return None
 
 
+def _analyse_momentum_bars(
+    bars: list[dict],
+    roc_threshold: float,
+    atr_period: int,
+) -> Optional[dict]:
+    """
+    Bar-based multi-timeframe momentum via pandas-ta (ROC on OHLCV closes + ATR).
+
+    Same return shape as _analyse_momentum so run_once is unchanged. Returns None
+    when pandas-ta is unavailable, there are too few bars, or indicators are invalid.
+    """
+    need = max(21, atr_period) + 2  # ROC_20 needs 21 closes
+    if not _HAS_PANDAS_TA or len(bars) < need:
+        return None
+
+    cols = ohlcv_columns(bars)
+    df = pd.DataFrame({
+        "high":  [float(x) for x in cols["high"]],
+        "low":   [float(x) for x in cols["low"]],
+        "close": [float(x) for x in cols["close"]],
+    })
+
+    def _last(series) -> Optional[float]:
+        if series is None:
+            return None
+        s = series.dropna()
+        return float(s.iloc[-1]) if not s.empty else None
+
+    roc1 = _last(ta.roc(df["close"], length=1))
+    roc5 = _last(ta.roc(df["close"], length=5))
+    roc20 = _last(ta.roc(df["close"], length=20))
+    atr = _last(ta.atr(df["high"], df["low"], df["close"], length=atr_period))
+
+    vals = (roc1, roc5, roc20, atr)
+    if any(v is None or not np.isfinite(v) for v in vals) or atr <= 0:
+        return None
+
+    current = float(df["close"].iloc[-1])
+
+    if roc1 > roc_threshold and roc5 > roc_threshold and roc20 > roc_threshold:
+        direction, strength = "buy", (roc1 + roc5 + roc20) / 3.0
+    elif roc1 < -roc_threshold and roc5 < -roc_threshold and roc20 < -roc_threshold:
+        direction, strength = "sell", abs((roc1 + roc5 + roc20) / 3.0)
+    else:
+        return None
+
+    return {
+        "direction": direction,
+        "roc_1": round(roc1, 4),
+        "roc_5": round(roc5, 4),
+        "roc_20": round(roc20, 4),
+        "strength": round(strength, 4),
+        "atr": round(atr, 8),
+        "current_price": current,
+    }
+
+
 class MomentumStrategy:
     """Multi-timeframe Rate-of-Change momentum continuation strategy."""
 
@@ -163,15 +230,26 @@ class MomentumStrategy:
         fee_bps = self._settings.MOM_FEE_BPS
         min_edge = self._settings.MOM_MIN_EDGE_BPS
 
+        use_bars = self._settings.MOM_USE_BARS and _HAS_PANDAS_TA
+        bar_seconds = self._settings.MOM_BAR_SECONDS
+
         for symbol in self._settings.momentum_symbol_list:
             venue = "binance" if "USDT" in symbol else "oanda"
-            ticks = await read_tick_cache(redis, venue, symbol, 60)
 
-            signal = _analyse_momentum(
-                ticks,
-                roc_threshold=self._settings.MOM_ROC_THRESHOLD,
-                atr_period=self._settings.MOM_ATR_PERIOD,
-            )
+            if use_bars:
+                bars = await read_ohlcv(redis, venue, symbol, bar_seconds, max_ticks=500)
+                signal = _analyse_momentum_bars(
+                    bars,
+                    roc_threshold=self._settings.MOM_ROC_THRESHOLD,
+                    atr_period=self._settings.MOM_ATR_PERIOD,
+                )
+            else:
+                ticks = await read_tick_cache(redis, venue, symbol, 60)
+                signal = _analyse_momentum(
+                    ticks,
+                    roc_threshold=self._settings.MOM_ROC_THRESHOLD,
+                    atr_period=self._settings.MOM_ATR_PERIOD,
+                )
 
             if signal is None:
                 continue

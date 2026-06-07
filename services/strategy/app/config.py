@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     MR_BB_STD_MULT: float = 2.0
     MR_MIN_EDGE_BPS: float = 3.0
     MR_FEE_BPS: float = 8.0
+    # Bar-based RSI + Bollinger via pandas-ta (see BREAKOUT_USE_BARS). OFF by
+    # default — same tick-cache depth caveat. Falls back to tick detection.
+    MR_USE_BARS: bool = False
+    MR_BAR_SECONDS: int = 15
 
     # ── Momentum parameters ───────────────────────────────────────────────────
     MOMENTUM_SYMBOLS: str = "BTC/USDT,ETH/USDT,SOL/USDT"
@@ -78,6 +82,10 @@ class Settings(BaseSettings):
     MOM_ATR_STOP_MULT: float = 1.5
     MOM_MIN_EDGE_BPS: float = 5.0
     MOM_FEE_BPS: float = 10.0
+    # Bar-based multi-timeframe ROC + ATR via pandas-ta (see BREAKOUT_USE_BARS).
+    # OFF by default — same tick-cache depth caveat. Falls back to tick detection.
+    MOM_USE_BARS: bool = False
+    MOM_BAR_SECONDS: int = 15
 
     # ── Risk/reward gate ─────────────────────────────────────────────────────
     # Minimum reward:risk ratio required to emit any signal.
