@@ -20,6 +20,9 @@ Redis keys read by get_strategy_kelly_fraction():
   strategy:avg_loss:{strategy}   — rolling average loss in USD
 
 These are written by the executor consumer after each trade settlement.
+
+Lives in mezna_shared so both the risk and executor services use one
+implementation (the executor sizes live orders; risk/backtest report sizing).
 """
 
 import math

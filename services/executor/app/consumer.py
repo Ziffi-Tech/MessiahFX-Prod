@@ -21,7 +21,9 @@ Leg direction rules (hard-coded by strategy type):
                   (tv_action / direction) — see _resolve_side / _build_order_plan.
 
 Position sizing:
-  quantity = settings.position_usd / current_price
+  position_usd = Kelly-derived size when KELLY_ENABLED and account equity is
+                 known, else the fixed settings.position_usd (_resolve_position_usd)
+  quantity = position_usd / current_price
   price source = latest_tick from Redis (same tick cache written by market-data)
   Oanda: rounded to nearest integer (exchange requirement)
   Binance: rounded to 8 decimal places (CCXT validates precision)
@@ -55,6 +57,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from mezna_shared.redis_client import RedisKeys, StreamNames
 from mezna_shared.regime_map import preferred_for_regime
+from mezna_shared.kelly import get_strategy_kelly_fraction, kelly_position_usd
 from .adapters import OrderRequest, OrderResult
 from .adapters import paper as paper_adapter
 from .adapters import binance as binance_adapter
@@ -314,6 +317,58 @@ async def _ensure_group(redis: Redis) -> None:
 
 
 # ── Position sizing ───────────────────────────────────────────────────────────
+
+async def _resolve_position_usd(
+    redis: Redis, settings: Settings, strategy_type: str
+) -> float:
+    """
+    Determine the per-leg position notional in USD for one opportunity.
+
+    Default (KELLY_ENABLED=False or ACCOUNT_EQUITY_USD<=0): returns the fixed
+    settings.position_usd — identical to prior behaviour, so enabling Kelly is a
+    deliberate operator action, never a silent sizing change.
+
+    When Kelly is enabled and equity is known, size from the strategy's live edge
+    stats (win rate / avg win / avg loss in Redis). If Kelly yields 0 (no edge
+    yet, or below the minimum position floor) fall back to the fixed size so
+    trades still flow during the cold-start period.
+    """
+    fixed = settings.position_usd
+    if not settings.KELLY_ENABLED or settings.ACCOUNT_EQUITY_USD <= 0.0:
+        return fixed
+
+    try:
+        fraction = await get_strategy_kelly_fraction(
+            redis, strategy_type, kelly_multiplier=settings.KELLY_MULTIPLIER,
+        )
+        sized = kelly_position_usd(
+            capital_usd=settings.ACCOUNT_EQUITY_USD,
+            kelly_fraction=fraction,
+            max_position_pct=settings.KELLY_MAX_POSITION_PCT,
+        )
+    except Exception as exc:
+        log.warning(
+            "executor.kelly_sizing_failed",
+            strategy=strategy_type, error=str(exc), fallback_usd=fixed,
+        )
+        return fixed
+
+    if sized <= 0.0:
+        log.info(
+            "executor.kelly_fallback_fixed",
+            strategy=strategy_type, fraction=round(fraction, 6), fixed_usd=fixed,
+        )
+        return fixed
+
+    log.info(
+        "executor.kelly_sized",
+        strategy=strategy_type,
+        fraction=round(fraction, 6),
+        position_usd=sized,
+        equity_usd=settings.ACCOUNT_EQUITY_USD,
+    )
+    return sized
+
 
 async def _calc_quantity(
     redis: Redis,
@@ -602,6 +657,10 @@ async def _process(
         )
         return
 
+    # Determine the per-leg position notional once for the whole opportunity
+    # (fixed sizing unless Kelly is explicitly enabled and equity is known).
+    position_usd = await _resolve_position_usd(redis, settings, strategy_type)
+
     # Execute each leg sequentially — preserves ordering and rate limits
     fills_attempted = 0
     fills_ok = 0
@@ -622,7 +681,7 @@ async def _process(
             venue=leg["venue"],
             symbol=leg["symbol"],
             side=leg["side"],
-            position_usd=settings.position_usd,
+            position_usd=position_usd,
         )
 
         if quantity is None or quantity <= 0:
@@ -740,7 +799,7 @@ async def _process(
         # Proxy P&L: expected edge × position notional (paper proxy; upgraded in Phase 4)
         net_edge_bps = float(payload.get("net_edge_bps") or 0.0)
         fee_bps      = float(payload.get("fee_cost_bps") or 0.0)
-        pos_usd      = settings.position_usd
+        pos_usd      = position_usd
         if won:
             proxy_pnl = (net_edge_bps / 10_000) * pos_usd
         else:
@@ -781,6 +840,8 @@ async def run(
         consumer=_CONSUMER_NAME,
         trading_mode=settings.TRADING_MODE,
         position_usd=settings.position_usd,
+        kelly_enabled=settings.KELLY_ENABLED,
+        account_equity_usd=settings.ACCOUNT_EQUITY_USD,
     )
 
     while True:

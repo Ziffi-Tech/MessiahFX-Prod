@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     EDGE_BASELINE_WIN_RATE: float = 0.55
     EDGE_DECAY_THRESHOLD: float = 0.15
 
+    # ── Kelly position sizing (opt-in) ─────────────────────────────────────────
+    # OFF by default: sizing stays at the fixed position_usd below. Enable only
+    # after enough live/paper edge stats have accumulated AND equity is set.
+    KELLY_ENABLED: bool = False
+    # Account equity used as the Kelly capital base. 0 = unknown → fixed sizing.
+    ACCOUNT_EQUITY_USD: float = 0.0
+    # Fractional Kelly multiplier (0.5 = half-Kelly; safer geometric growth).
+    KELLY_MULTIPLIER: float = 0.5
+    # Hard per-position cap as a fraction of equity (independent of Kelly output).
+    KELLY_MAX_POSITION_PCT: float = 0.05
+
     @property
     def mt5_configured(self) -> bool:
         return bool(self.MT5_BRIDGE_URL)
