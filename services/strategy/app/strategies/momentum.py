@@ -147,6 +147,11 @@ def _analyse_momentum(
     return None
 
 
+def _min_momentum_bars(atr_period: int) -> int:
+    """Bars required for a valid bar-based reading. ROC_20 needs 21 closes."""
+    return max(21, atr_period) + 2
+
+
 def _analyse_momentum_bars(
     bars: list[dict],
     roc_threshold: float,
@@ -158,8 +163,7 @@ def _analyse_momentum_bars(
     Same return shape as _analyse_momentum so run_once is unchanged. Returns None
     when pandas-ta is unavailable, there are too few bars, or indicators are invalid.
     """
-    need = max(21, atr_period) + 2  # ROC_20 needs 21 closes
-    if not _HAS_PANDAS_TA or len(bars) < need:
+    if not _HAS_PANDAS_TA or len(bars) < _min_momentum_bars(atr_period):
         return None
 
     cols = ohlcv_columns(bars)
@@ -237,14 +241,22 @@ class MomentumStrategy:
         for spec in self._settings.momentum_symbol_list:
             venue, symbol = parse_symbol_spec(spec)
 
+            signal = None
+            detected_via_bars = False
             if use_bars:
                 bars = await read_ohlcv(redis, venue, symbol, bar_seconds, max_ticks=500)
-                signal = _analyse_momentum_bars(
-                    bars,
-                    roc_threshold=self._settings.MOM_ROC_THRESHOLD,
-                    atr_period=self._settings.MOM_ATR_PERIOD,
-                )
-            else:
+                if len(bars) >= _min_momentum_bars(self._settings.MOM_ATR_PERIOD):
+                    signal = _analyse_momentum_bars(
+                        bars,
+                        roc_threshold=self._settings.MOM_ROC_THRESHOLD,
+                        atr_period=self._settings.MOM_ATR_PERIOD,
+                    )
+                    detected_via_bars = True
+                else:
+                    # Too few candles — fall through to ticks so we keep emitting.
+                    log.debug("momentum.bars_insufficient", symbol=symbol, bars=len(bars))
+
+            if not detected_via_bars:
                 ticks = await read_tick_cache(redis, venue, symbol, 60)
                 signal = _analyse_momentum(
                     ticks,

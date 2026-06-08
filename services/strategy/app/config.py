@@ -54,11 +54,12 @@ class Settings(BaseSettings):
     BREAKOUT_MIN_EDGE_BPS: float = 4.0
     BREAKOUT_FEE_BPS: float = 10.0
     # Bar-based detection: real ATR (pandas-ta) on OHLCV candles built from the
-    # tick cache, instead of the tick-mid approximation. OFF by default — the
-    # 500-tick cache may not hold a full BREAKOUT_LOOKBACK of BREAKOUT_BAR_SECONDS
-    # candles for liquid symbols, so enable once tick history / bar persistence is
-    # sufficient. Falls back to tick-based detection when OFF or pandas-ta absent.
-    BREAKOUT_USE_BARS: bool = False
+    # tick cache, instead of the tick-mid approximation. ON by default — when the
+    # 500-tick cache can't build a full lookback of candles (e.g. liquid symbols
+    # whose 500 ticks span < a lookback window), the strategy automatically falls
+    # back to tick-based detection per symbol, so it never goes silent. Also falls
+    # back when pandas-ta is unavailable.
+    BREAKOUT_USE_BARS: bool = True
     BREAKOUT_BAR_SECONDS: int = 15
 
     # ── Mean Reversion Scalp parameters ──────────────────────────────────────
@@ -70,9 +71,10 @@ class Settings(BaseSettings):
     MR_BB_STD_MULT: float = 2.0
     MR_MIN_EDGE_BPS: float = 3.0
     MR_FEE_BPS: float = 8.0
-    # Bar-based RSI + Bollinger via pandas-ta (see BREAKOUT_USE_BARS). OFF by
-    # default — same tick-cache depth caveat. Falls back to tick detection.
-    MR_USE_BARS: bool = False
+    # Bar-based RSI + Bollinger via pandas-ta (see BREAKOUT_USE_BARS). ON by
+    # default — auto-falls back to tick detection per symbol when bar history is
+    # too thin or pandas-ta is unavailable.
+    MR_USE_BARS: bool = True
     MR_BAR_SECONDS: int = 15
 
     # ── Momentum parameters ───────────────────────────────────────────────────
@@ -83,8 +85,9 @@ class Settings(BaseSettings):
     MOM_MIN_EDGE_BPS: float = 5.0
     MOM_FEE_BPS: float = 10.0
     # Bar-based multi-timeframe ROC + ATR via pandas-ta (see BREAKOUT_USE_BARS).
-    # OFF by default — same tick-cache depth caveat. Falls back to tick detection.
-    MOM_USE_BARS: bool = False
+    # ON by default — auto-falls back to tick detection per symbol when bar history
+    # is too thin or pandas-ta is unavailable.
+    MOM_USE_BARS: bool = True
     MOM_BAR_SECONDS: int = 15
 
     # ── Risk/reward gate ─────────────────────────────────────────────────────

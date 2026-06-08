@@ -131,6 +131,11 @@ def _detect_breakout(
     return None
 
 
+def _min_breakout_bars(lookback: int, atr_period: int) -> int:
+    """Bars required for a valid bar-based reading: lookback range + ATR + current."""
+    return lookback + atr_period + 2
+
+
 def _detect_breakout_bars(
     bars: list[dict],
     lookback: int,
@@ -144,7 +149,7 @@ def _detect_breakout_bars(
     Returns the same dict shape as _detect_breakout (so run_once is unchanged), or
     None when pandas-ta is unavailable, there are too few bars, or ATR is invalid.
     """
-    if not _HAS_PANDAS_TA or len(bars) < lookback + atr_period + 2:
+    if not _HAS_PANDAS_TA or len(bars) < _min_breakout_bars(lookback, atr_period):
         return None
 
     cols = ohlcv_columns(bars)
@@ -232,12 +237,22 @@ class BreakoutStrategy:
         for spec in self._settings.breakout_symbol_list:
             venue, symbol = parse_symbol_spec(spec)
 
+            signal = None
+            detected_via_bars = False
             if use_bars:
                 # Real ATR/range on OHLCV candles resampled from the tick cache.
                 bars = await read_ohlcv(redis, venue, symbol, bar_seconds, max_ticks=500)
-                signal = _detect_breakout_bars(bars, lookback, atr_period, atr_mult)
-            else:
-                # Tick-based approximation (default; see BREAKOUT_USE_BARS).
+                if len(bars) >= _min_breakout_bars(lookback, atr_period):
+                    signal = _detect_breakout_bars(bars, lookback, atr_period, atr_mult)
+                    detected_via_bars = True
+                else:
+                    # Too few candles in the tick cache — fall through to tick
+                    # detection so the strategy keeps emitting instead of going silent.
+                    log.debug("breakout.bars_insufficient", symbol=symbol, bars=len(bars))
+
+            if not detected_via_bars:
+                # Tick-based approximation (default; also the fallback when bar
+                # history is too thin — see BREAKOUT_USE_BARS).
                 ticks = await read_tick_cache(redis, venue, symbol, lookback + atr_period + 10)
                 if len(ticks) < BREAKOUT_MIN_TICKS:
                     continue

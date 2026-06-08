@@ -165,6 +165,11 @@ def _analyse(
     return None
 
 
+def _min_mr_bars(rsi_period: int, bb_period: int) -> int:
+    """Bars required for a valid bar-based RSI + Bollinger reading."""
+    return max(rsi_period, bb_period) + 2
+
+
 def _analyse_bars(
     bars: list[dict],
     rsi_period: int,
@@ -179,8 +184,7 @@ def _analyse_bars(
     Same return shape as _analyse so run_once is unchanged. Returns None when
     pandas-ta is unavailable, there are too few bars, or indicators are invalid.
     """
-    need = max(rsi_period, bb_period) + 2
-    if not _HAS_PANDAS_TA or len(bars) < need:
+    if not _HAS_PANDAS_TA or len(bars) < _min_mr_bars(rsi_period, bb_period):
         return None
 
     cols = ohlcv_columns(bars)
@@ -274,17 +278,27 @@ class MeanReversionScalpStrategy:
         for spec in self._settings.mean_reversion_symbol_list:
             venue, symbol = parse_symbol_spec(spec)
 
+            signal = None
+            detected_via_bars = False
             if use_bars:
                 bars = await read_ohlcv(redis, venue, symbol, bar_seconds, max_ticks=500)
-                signal = _analyse_bars(
-                    bars,
-                    rsi_period=self._settings.MR_RSI_PERIOD,
-                    rsi_oversold=self._settings.MR_RSI_OVERSOLD,
-                    rsi_overbought=self._settings.MR_RSI_OVERBOUGHT,
-                    bb_period=self._settings.MR_BB_PERIOD,
-                    bb_std_mult=self._settings.MR_BB_STD_MULT,
-                )
-            else:
+                if len(bars) >= _min_mr_bars(
+                    self._settings.MR_RSI_PERIOD, self._settings.MR_BB_PERIOD
+                ):
+                    signal = _analyse_bars(
+                        bars,
+                        rsi_period=self._settings.MR_RSI_PERIOD,
+                        rsi_oversold=self._settings.MR_RSI_OVERSOLD,
+                        rsi_overbought=self._settings.MR_RSI_OVERBOUGHT,
+                        bb_period=self._settings.MR_BB_PERIOD,
+                        bb_std_mult=self._settings.MR_BB_STD_MULT,
+                    )
+                    detected_via_bars = True
+                else:
+                    # Too few candles — fall through to ticks so we keep emitting.
+                    log.debug("mean_reversion.bars_insufficient", symbol=symbol, bars=len(bars))
+
+            if not detected_via_bars:
                 ticks = await read_tick_cache(redis, venue, symbol, 80)
                 signal = _analyse(
                     ticks,
