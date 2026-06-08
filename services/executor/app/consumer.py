@@ -57,6 +57,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from mezna_shared.redis_client import RedisKeys, StreamNames
 from mezna_shared.regime_map import preferred_for_regime
 from mezna_shared.kelly import get_strategy_kelly_fraction, kelly_position_usd
+from mezna_shared.audit import write_audit_log
 from .adapters import OrderRequest, OrderResult
 from .adapters.registry import AdapterRegistry
 from . import db as trade_db
@@ -619,6 +620,14 @@ async def _process(
             strategy_type=strategy_type,
             hint="risk:halt active — in-flight signal dropped, not executed",
         )
+        await write_audit_log(
+            db_engine,
+            event_type="executor.halted_skip",
+            service="executor",
+            entity_type="opportunity",
+            entity_id=opportunity_id,
+            payload={"strategy_type": strategy_type, "venue": venue},
+        )
         return
 
     # Build leg plan
@@ -628,6 +637,14 @@ async def _process(
             "executor.skipped",
             strategy_type=strategy_type,
             opportunity_id=opportunity_id,
+        )
+        await write_audit_log(
+            db_engine,
+            event_type="executor.skipped",
+            service="executor",
+            entity_type="opportunity",
+            entity_id=opportunity_id,
+            payload={"strategy_type": strategy_type, "venue": venue, "reason": "no_order_plan"},
         )
         return
 
@@ -763,6 +780,24 @@ async def _process(
         fills_attempted=fills_attempted,
         fills_ok=fills_ok,
         all_filled=fills_ok == fills_attempted,
+    )
+
+    # Durable audit trail for the order-lifecycle (complements per-fill trade rows).
+    await write_audit_log(
+        db_engine,
+        event_type="executor.opportunity_executed",
+        service="executor",
+        entity_type="opportunity",
+        entity_id=opportunity_id,
+        payload={
+            "strategy_type": strategy_type,
+            "venue": venue,
+            "fills_attempted": fills_attempted,
+            "fills_ok": fills_ok,
+            "all_filled": fills_ok == fills_attempted,
+            "realized_pnl": round(realized_total, 6),
+            "paper": settings.is_paper,
+        },
     )
 
     # ── Record outcome — real realized P&L drives edge/Kelly/drawdown; ─────────
