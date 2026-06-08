@@ -607,6 +607,20 @@ async def _process(
         paper=settings.is_paper,
     )
 
+    # ── Kill-switch defense-in-depth ──────────────────────────────────────────
+    # The risk engine blocks the halt at approval time, but a halt can fire AFTER
+    # an opportunity was approved and queued. Re-check here so an in-flight signal
+    # is never executed during a halt. Dropped (ACK'd by the caller) — not retried,
+    # since it would be stale by the time the halt lifts.
+    if await redis.get(RedisKeys.HALT) == "1":
+        log.warning(
+            "executor.halted_skip",
+            opportunity_id=opportunity_id,
+            strategy_type=strategy_type,
+            hint="risk:halt active — in-flight signal dropped, not executed",
+        )
+        return
+
     # Build leg plan
     legs = _build_order_plan(payload)
     if not legs:
