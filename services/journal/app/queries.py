@@ -568,12 +568,14 @@ _MARK_TRADE_ERROR = text("""
         AND status IN ('pending', 'open')
 """)
 
+# Real concurrent exposure: distinct net positions currently open. Uses the
+# positions ledger (migration 003) rather than trades — market orders fill/reject
+# immediately so trades are ~never left 'pending'/'open', which made the old count
+# ~0 and the risk position limit never bind.
 _OPEN_POSITION_COUNT = text("""
-    SELECT COUNT(DISTINCT opportunity_id)
-    FROM trades
-    WHERE
-        opportunity_id IS NOT NULL
-        AND status IN ('pending', 'open', 'partially_filled')
+    SELECT COUNT(*)
+    FROM positions
+    WHERE status = 'open'
 """)
 
 
@@ -594,6 +596,13 @@ async def mark_trade_error(
 
 
 async def count_open_positions(db_engine: AsyncEngine) -> int:
+    """
+    Number of net positions currently open (positions.status='open').
+
+    The journal reconciler writes this to risk_state.open_position_count, which the
+    risk engine enforces against RISK_MAX_OPEN_POSITIONS. Now that it reflects real
+    exposure, the limit actually binds — tune RISK_MAX_OPEN_POSITIONS accordingly.
+    """
     async with get_async_session(db_engine) as session:
         row = (await session.execute(_OPEN_POSITION_COUNT)).fetchone()
     return int(row[0]) if row else 0
