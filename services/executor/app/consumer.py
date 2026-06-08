@@ -50,7 +50,6 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-import httpx
 import structlog
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -59,7 +58,7 @@ from mezna_shared.redis_client import RedisKeys, StreamNames
 from mezna_shared.regime_map import preferred_for_regime
 from mezna_shared.kelly import get_strategy_kelly_fraction, kelly_position_usd
 from .adapters import OrderRequest, OrderResult
-from .adapters.registry import build_registry, resolve_adapter
+from .adapters.registry import AdapterRegistry
 from . import db as trade_db
 from .config import Settings, settings
 
@@ -506,7 +505,7 @@ async def _execute_leg(
     opportunity_id: str | None,
     payload: dict,
     settings: Settings,
-    adapters: dict,
+    registry: AdapterRegistry,
 ) -> tuple[OrderRequest, OrderResult]:
     """
     Build an OrderRequest and route it through the venue adapter registry.
@@ -534,7 +533,7 @@ async def _execute_leg(
     )
 
     try:
-        adapter = resolve_adapter(adapters, venue, is_paper=settings.is_paper)
+        adapter = registry.resolve(venue)
         if adapter is None:
             raise ValueError(f"Unknown venue: {venue!r}")
         result = await adapter.execute(order)
@@ -571,7 +570,7 @@ async def _process(
     redis: Redis,
     db_engine: AsyncEngine,
     settings: Settings,
-    adapters: dict,
+    registry: AdapterRegistry,
 ) -> None:
     """
     Process one execution-queue message end-to-end.
@@ -693,7 +692,7 @@ async def _process(
             opportunity_id=opportunity_id,
             payload=payload,
             settings=settings,
-            adapters=adapters,
+            registry=registry,
         )
         fills_attempted += 1
 
@@ -769,13 +768,7 @@ async def run(
     settings: Settings,
     redis: Redis,
     db_engine: AsyncEngine,
-    spot_exchange,
-    perp_exchange,
-    oanda_client: httpx.AsyncClient | None,
-    mt5_client: httpx.AsyncClient | None,
-    bybit_exchange=None,
-    okx_exchange=None,
-    kraken_exchange=None,
+    registry: AdapterRegistry,
 ) -> None:
     """
     Main consumer loop — runs for the lifetime of the service.
@@ -786,19 +779,6 @@ async def run(
     """
     await _ensure_group(redis)
 
-    # Build the venue -> adapter registry once from the injected clients.
-    adapters = build_registry(
-        settings=settings,
-        redis=redis,
-        spot_exchange=spot_exchange,
-        perp_exchange=perp_exchange,
-        oanda_client=oanda_client,
-        mt5_client=mt5_client,
-        bybit_exchange=bybit_exchange,
-        okx_exchange=okx_exchange,
-        kraken_exchange=kraken_exchange,
-    )
-
     log.info(
         "executor.consumer_started",
         group=_CONSUMER_GROUP,
@@ -807,7 +787,7 @@ async def run(
         position_usd=settings.position_usd,
         kelly_enabled=settings.KELLY_ENABLED,
         account_equity_usd=settings.ACCOUNT_EQUITY_USD,
-        venues=sorted(adapters),
+        venues=registry.venues,
     )
 
     while True:
@@ -840,7 +820,7 @@ async def run(
                         redis=redis,
                         db_engine=db_engine,
                         settings=settings,
-                        adapters=adapters,
+                        registry=registry,
                     )
                     ack = True  # Safe to ACK — processing complete or irrecoverable error
 

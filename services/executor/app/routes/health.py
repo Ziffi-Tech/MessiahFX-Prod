@@ -91,36 +91,9 @@ async def execution_status(request: Request) -> JSONResponse:
     consumer_task = getattr(request.app.state, "consumer_task", None)
     consumer_running = consumer_task is not None and not consumer_task.done()
 
-    # ── Adapter status ────────────────────────────────────────────────────────
-    spot_exchange = getattr(request.app.state, "spot_exchange", None)
-    perp_exchange = getattr(request.app.state, "perp_exchange", None)
-    oanda_client = getattr(request.app.state, "oanda_client", None)
-    mt5_client = getattr(request.app.state, "mt5_client", None)
-
-    adapters = {
-        "paper": {
-            "active": settings.is_paper,
-        },
-        "binance": {
-            "configured": bool(settings.BINANCE_API_KEY and settings.BINANCE_API_SECRET),
-            "initialised": spot_exchange is not None and perp_exchange is not None,
-            "testnet": settings.BINANCE_TESTNET,
-            "taker_fee_bps": settings.BINANCE_TAKER_FEE_BPS,
-        },
-        "oanda": {
-            "configured": bool(settings.OANDA_API_KEY and settings.OANDA_ACCOUNT_ID),
-            "initialised": oanda_client is not None,
-            "environment": settings.OANDA_ENVIRONMENT,
-            "spread_bps": settings.OANDA_SPREAD_BPS,
-        },
-        "mt5": {
-            "configured": settings.mt5_configured,
-            "initialised": mt5_client is not None,
-            "bridge_url": settings.MT5_BRIDGE_URL,
-            "api_key_set": bool(settings.MT5_BRIDGE_API_KEY),
-            "spread_bps": settings.MT5_SPREAD_BPS,
-        },
-    }
+    # ── Adapter status (from the registry, which owns the venue clients) ───────
+    registry = getattr(request.app.state, "adapter_registry", None)
+    adapters = registry.status() if registry is not None else {}
 
     return JSONResponse(
         content={

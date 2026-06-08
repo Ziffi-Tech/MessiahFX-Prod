@@ -24,7 +24,6 @@ CRITICAL: This service runs with a SINGLE Uvicorn worker.
 
 import asyncio
 
-import httpx
 import structlog
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -36,10 +35,7 @@ from mezna_shared.redis_client import get_redis, close_redis
 
 from .config import settings
 from .routes import health
-from .adapters import binance as binance_adapter
-from .adapters import bybit as bybit_adapter
-from .adapters import okx as okx_adapter
-from .adapters import kraken as kraken_adapter
+from .adapters.registry import AdapterRegistry
 from . import consumer
 
 setup_logging(
@@ -95,136 +91,12 @@ async def lifespan(app: FastAPI):
 
     await app.state.redis.ping()
 
-    # ── MT5 bridge client (always created — bridge handles paper/live internally) ─
-    # The bridge runs natively on Windows; containers reach it via host.containers.internal.
-    # We always open the client regardless of TRADING_MODE because the bridge's
-    # /order/place endpoint respects the paper_mode flag we send per-order.
-    mt5_client: httpx.AsyncClient | None = None
-    if settings.mt5_configured:
-        mt5_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(20.0, connect=5.0),
-            limits=httpx.Limits(max_connections=4, max_keepalive_connections=2),
-        )
-        log.info(
-            "executor.mt5_client_ready",
-            bridge_url=settings.MT5_BRIDGE_URL,
-            api_key_set=bool(settings.MT5_BRIDGE_API_KEY),
-            note="MT5 bridge client initialised — bridge handles lot sizing",
-        )
-    else:
-        log.warning(
-            "executor.mt5_not_configured",
-            hint="MT5_BRIDGE_URL is empty — MT5 orders will error",
-        )
-
-    # ── Exchange clients (live mode only) ─────────────────────────────────────
-    spot_exchange = None
-    perp_exchange = None
-    oanda_client = None
-    bybit_exchange = None
-    okx_exchange = None
-    kraken_exchange = None
-
-    if not settings.is_paper:
-        if settings.BINANCE_API_KEY and settings.BINANCE_API_SECRET:
-            spot_exchange = binance_adapter.make_spot_exchange(
-                settings.BINANCE_API_KEY,
-                settings.BINANCE_API_SECRET,
-                settings.BINANCE_TESTNET,
-            )
-            perp_exchange = binance_adapter.make_perp_exchange(
-                settings.BINANCE_API_KEY,
-                settings.BINANCE_API_SECRET,
-                settings.BINANCE_TESTNET,
-            )
-            log.info(
-                "executor.binance_ready",
-                testnet=settings.BINANCE_TESTNET,
-                note="spot + perp exchange instances created",
-            )
-        else:
-            log.warning(
-                "executor.binance_not_configured",
-                hint="BINANCE_API_KEY/SECRET not set — Binance orders will error",
-            )
-
-        if settings.OANDA_API_KEY and settings.OANDA_ACCOUNT_ID:
-            oanda_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(10.0),
-                limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
-            )
-            log.info(
-                "executor.oanda_ready",
-                environment=settings.OANDA_ENVIRONMENT,
-                base_url=settings.oanda_rest_url,
-            )
-        else:
-            log.warning(
-                "executor.oanda_not_configured",
-                hint="OANDA_API_KEY/ACCOUNT_ID not set — Oanda orders will error",
-            )
-
-        if settings.BYBIT_API_KEY and settings.BYBIT_API_SECRET:
-            bybit_exchange = bybit_adapter.make_exchange(
-                settings.BYBIT_API_KEY,
-                settings.BYBIT_API_SECRET,
-                settings.BYBIT_TESTNET,
-            )
-            log.info(
-                "executor.bybit_ready",
-                testnet=settings.BYBIT_TESTNET,
-                note="linear USDT perp exchange instance created",
-            )
-        else:
-            log.warning(
-                "executor.bybit_not_configured",
-                hint="BYBIT_API_KEY/SECRET not set — Bybit orders will error",
-            )
-
-        if settings.OKX_API_KEY and settings.OKX_API_SECRET:
-            okx_exchange = okx_adapter.make_exchange(
-                settings.OKX_API_KEY,
-                settings.OKX_API_SECRET,
-                settings.OKX_TESTNET,
-                settings.OKX_API_PASSWORD,
-            )
-            log.info(
-                "executor.okx_ready",
-                testnet=settings.OKX_TESTNET,
-                note="linear USDT perp exchange instance created",
-            )
-        else:
-            log.warning(
-                "executor.okx_not_configured",
-                hint="OKX_API_KEY/SECRET not set — OKX orders will error",
-            )
-
-        if settings.KRAKEN_API_KEY and settings.KRAKEN_API_SECRET:
-            kraken_exchange = kraken_adapter.make_exchange(
-                settings.KRAKEN_API_KEY,
-                settings.KRAKEN_API_SECRET,
-                settings.KRAKEN_TESTNET,
-            )
-            log.info("executor.kraken_ready", note="spot exchange instance created")
-        else:
-            log.warning(
-                "executor.kraken_not_configured",
-                hint="KRAKEN_API_KEY/SECRET not set — Kraken orders will error",
-            )
-    else:
-        log.info(
-            "executor.paper_mode",
-            note="No exchange connections opened — all fills are simulated",
-        )
-
-    # Expose adapters on app.state for health checks
-    app.state.spot_exchange = spot_exchange
-    app.state.perp_exchange = perp_exchange
-    app.state.oanda_client = oanda_client
-    app.state.mt5_client = mt5_client
-    app.state.bybit_exchange = bybit_exchange
-    app.state.okx_exchange = okx_exchange
-    app.state.kraken_exchange = kraken_exchange
+    # ── Adapter registry — owns every venue's client + lifecycle ──────────────
+    # Creating the registry opens the live exchange clients (per settings; none in
+    # paper mode except the MT5 bridge client). Adding a venue is a registry-only
+    # change — main.py no longer threads per-venue clients to the consumer.
+    registry = await AdapterRegistry(settings, app.state.redis).build()
+    app.state.adapter_registry = registry
 
     # ── Consumer task ─────────────────────────────────────────────────────────
     consumer_task = asyncio.create_task(
@@ -232,13 +104,7 @@ async def lifespan(app: FastAPI):
             settings=settings,
             redis=app.state.redis,
             db_engine=app.state.db_engine,
-            spot_exchange=spot_exchange,
-            perp_exchange=perp_exchange,
-            oanda_client=oanda_client,
-            mt5_client=mt5_client,
-            bybit_exchange=bybit_exchange,
-            okx_exchange=okx_exchange,
-            kraken_exchange=kraken_exchange,
+            registry=registry,
         ),
         name="executor-consumer",
     )
@@ -258,27 +124,7 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
 
-    if spot_exchange is not None:
-        await spot_exchange.close()
-        log.info("executor.binance_spot_closed")
-    if perp_exchange is not None:
-        await perp_exchange.close()
-        log.info("executor.binance_perp_closed")
-    if bybit_exchange is not None:
-        await bybit_exchange.close()
-        log.info("executor.bybit_closed")
-    if okx_exchange is not None:
-        await okx_exchange.close()
-        log.info("executor.okx_closed")
-    if kraken_exchange is not None:
-        await kraken_exchange.close()
-        log.info("executor.kraken_closed")
-    if oanda_client is not None:
-        await oanda_client.aclose()
-        log.info("executor.oanda_client_closed")
-    if mt5_client is not None:
-        await mt5_client.aclose()
-        log.info("executor.mt5_client_closed")
+    await registry.aclose()
 
     await close_redis()
     await dispose_engine()

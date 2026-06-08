@@ -18,6 +18,7 @@ adapter (simulated fills) via resolve_adapter(), regardless of the leg's venue.
 
 from typing import Any, Protocol, runtime_checkable
 
+import httpx
 import structlog
 from redis.asyncio import Redis
 
@@ -186,46 +187,152 @@ class Mt5Adapter:
         )
 
 
-def build_registry(
-    *,
-    settings: Settings,
-    redis: Redis,
-    spot_exchange: Any,
-    perp_exchange: Any,
-    oanda_client: Any,
-    mt5_client: Any,
-    bybit_exchange: Any = None,
-    okx_exchange: Any = None,
-    kraken_exchange: Any = None,
-) -> dict[str, BaseExchangeAdapter]:
+class AdapterRegistry:
     """
-    Build the venue -> adapter registry from the executor's live dependencies.
+    Owns the venue adapters AND the lifecycle of the exchange clients they wrap.
 
-    Always includes the paper adapter. Live-venue adapters are registered with
-    their clients (which may be None in paper mode — they raise only if actually
-    used in live mode). To support a new venue, construct its adapter here.
-    """
-    registry: dict[str, BaseExchangeAdapter] = {
-        PAPER: PaperAdapter(redis, settings),
-        "binance": BinanceAdapter(spot_exchange, perp_exchange, settings),
-        "bybit": BybitAdapter(bybit_exchange, settings),
-        "okx": OkxAdapter(okx_exchange, settings),
-        "kraken": KrakenAdapter(kraken_exchange, settings),
-        "oanda": OandaAdapter(oanda_client, settings),
-        "mt5": Mt5Adapter(mt5_client, settings),
-    }
-    return registry
+    build() creates each venue's live client from settings (paper mode opens none,
+    except the MT5 bridge client which itself honours per-order paper_mode), wires
+    one adapter per venue, and resolve() routes by venue (paper-mode override sends
+    every venue to the paper adapter). aclose() closes every client created here.
 
+    Adding a venue is now self-contained: add its make_*/client creation in build()
+    and one adapter entry — main.py and consumer.run do not change.
+    """
 
-def resolve_adapter(
-    registry: dict[str, BaseExchangeAdapter],
-    venue: str,
-    *,
-    is_paper: bool,
-) -> BaseExchangeAdapter | None:
-    """
-    Select the adapter for a leg. In paper mode all venues route to the paper
-    adapter (simulated fills). Returns None for an unknown venue in live mode.
-    """
-    key = PAPER if is_paper else venue
-    return registry.get(key)
+    def __init__(self, settings: Settings, redis: Redis) -> None:
+        self._settings = settings
+        self._redis = redis
+        self._adapters: dict[str, BaseExchangeAdapter] = {}
+        self._clients: dict[str, Any] = {}  # name -> client, for status() + aclose()
+
+    async def build(self) -> "AdapterRegistry":
+        s, r = self._settings, self._redis
+        self._adapters[PAPER] = PaperAdapter(r, s)
+
+        # MT5 bridge client — always created if configured (bridge handles paper/live
+        # per-order). Containers reach the Windows-native bridge via host.containers.internal.
+        mt5_client = None
+        if s.mt5_configured:
+            mt5_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(20.0, connect=5.0),
+                limits=httpx.Limits(max_connections=4, max_keepalive_connections=2),
+            )
+            self._clients["mt5"] = mt5_client
+            log.info(
+                "executor.mt5_client_ready",
+                bridge_url=s.MT5_BRIDGE_URL,
+                api_key_set=bool(s.MT5_BRIDGE_API_KEY),
+            )
+        else:
+            log.warning("executor.mt5_not_configured", hint="MT5_BRIDGE_URL empty — MT5 orders will error")
+        self._adapters["mt5"] = Mt5Adapter(mt5_client, s)
+
+        # Live venue clients are opened only in live mode.
+        spot = perp = oanda = bybit = okx = kraken = None
+        if not s.is_paper:
+            if s.BINANCE_API_KEY and s.BINANCE_API_SECRET:
+                spot = binance_adapter.make_spot_exchange(s.BINANCE_API_KEY, s.BINANCE_API_SECRET, s.BINANCE_TESTNET)
+                perp = binance_adapter.make_perp_exchange(s.BINANCE_API_KEY, s.BINANCE_API_SECRET, s.BINANCE_TESTNET)
+                self._clients["binance_spot"] = spot
+                self._clients["binance_perp"] = perp
+                log.info("executor.binance_ready", testnet=s.BINANCE_TESTNET)
+            else:
+                log.warning("executor.binance_not_configured", hint="BINANCE_API_KEY/SECRET not set")
+
+            if s.OANDA_API_KEY and s.OANDA_ACCOUNT_ID:
+                oanda = httpx.AsyncClient(
+                    timeout=httpx.Timeout(10.0),
+                    limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
+                )
+                self._clients["oanda"] = oanda
+                log.info("executor.oanda_ready", environment=s.OANDA_ENVIRONMENT, base_url=s.oanda_rest_url)
+            else:
+                log.warning("executor.oanda_not_configured", hint="OANDA_API_KEY/ACCOUNT_ID not set")
+
+            if s.BYBIT_API_KEY and s.BYBIT_API_SECRET:
+                bybit = bybit_adapter.make_exchange(s.BYBIT_API_KEY, s.BYBIT_API_SECRET, s.BYBIT_TESTNET)
+                self._clients["bybit"] = bybit
+                log.info("executor.bybit_ready", testnet=s.BYBIT_TESTNET)
+            else:
+                log.warning("executor.bybit_not_configured", hint="BYBIT_API_KEY/SECRET not set")
+
+            if s.OKX_API_KEY and s.OKX_API_SECRET:
+                okx = okx_adapter.make_exchange(s.OKX_API_KEY, s.OKX_API_SECRET, s.OKX_TESTNET, s.OKX_API_PASSWORD)
+                self._clients["okx"] = okx
+                log.info("executor.okx_ready", testnet=s.OKX_TESTNET)
+            else:
+                log.warning("executor.okx_not_configured", hint="OKX_API_KEY/SECRET not set")
+
+            if s.KRAKEN_API_KEY and s.KRAKEN_API_SECRET:
+                kraken = kraken_adapter.make_exchange(s.KRAKEN_API_KEY, s.KRAKEN_API_SECRET, s.KRAKEN_TESTNET)
+                self._clients["kraken"] = kraken
+                log.info("executor.kraken_ready")
+            else:
+                log.warning("executor.kraken_not_configured", hint="KRAKEN_API_KEY/SECRET not set")
+        else:
+            log.info("executor.paper_mode", note="No exchange connections opened — all fills simulated")
+
+        self._adapters["binance"] = BinanceAdapter(spot, perp, s)
+        self._adapters["bybit"] = BybitAdapter(bybit, s)
+        self._adapters["okx"] = OkxAdapter(okx, s)
+        self._adapters["kraken"] = KrakenAdapter(kraken, s)
+        self._adapters["oanda"] = OandaAdapter(oanda, s)
+        return self
+
+    @property
+    def venues(self) -> list[str]:
+        return sorted(self._adapters)
+
+    def resolve(self, venue: str) -> BaseExchangeAdapter | None:
+        """Adapter for a leg; paper mode routes every venue to the paper adapter."""
+        key = PAPER if self._settings.is_paper else venue
+        return self._adapters.get(key)
+
+    def status(self) -> dict[str, dict]:
+        """Per-venue config/initialised status for the /health/execution endpoint."""
+        s = self._settings
+        c = self._clients
+        return {
+            "paper": {"active": s.is_paper},
+            "binance": {
+                "configured": bool(s.BINANCE_API_KEY and s.BINANCE_API_SECRET),
+                "initialised": "binance_spot" in c and "binance_perp" in c,
+                "testnet": s.BINANCE_TESTNET, "taker_fee_bps": s.BINANCE_TAKER_FEE_BPS,
+            },
+            "bybit": {
+                "configured": bool(s.BYBIT_API_KEY and s.BYBIT_API_SECRET),
+                "initialised": "bybit" in c, "testnet": s.BYBIT_TESTNET,
+                "taker_fee_bps": s.BYBIT_TAKER_FEE_BPS,
+            },
+            "okx": {
+                "configured": bool(s.OKX_API_KEY and s.OKX_API_SECRET),
+                "initialised": "okx" in c, "testnet": s.OKX_TESTNET,
+                "taker_fee_bps": s.OKX_TAKER_FEE_BPS,
+            },
+            "kraken": {
+                "configured": bool(s.KRAKEN_API_KEY and s.KRAKEN_API_SECRET),
+                "initialised": "kraken" in c, "taker_fee_bps": s.KRAKEN_TAKER_FEE_BPS,
+            },
+            "oanda": {
+                "configured": bool(s.OANDA_API_KEY and s.OANDA_ACCOUNT_ID),
+                "initialised": "oanda" in c, "environment": s.OANDA_ENVIRONMENT,
+                "spread_bps": s.OANDA_SPREAD_BPS,
+            },
+            "mt5": {
+                "configured": s.mt5_configured, "initialised": "mt5" in c,
+                "bridge_url": s.MT5_BRIDGE_URL, "api_key_set": bool(s.MT5_BRIDGE_API_KEY),
+                "spread_bps": s.MT5_SPREAD_BPS,
+            },
+        }
+
+    async def aclose(self) -> None:
+        """Close every client created in build(). ccxt uses .close(); httpx .aclose()."""
+        for name, client in self._clients.items():
+            try:
+                closer = getattr(client, "aclose", None) or getattr(client, "close", None)
+                if closer is not None:
+                    await closer()
+                log.info("executor.client_closed", client=name)
+            except Exception as exc:
+                log.warning("executor.client_close_failed", client=name, error=str(exc))
