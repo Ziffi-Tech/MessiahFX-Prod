@@ -29,6 +29,18 @@ class Settings(BaseSettings):
     BYBIT_TESTNET: bool = True
     BYBIT_PERP_SYMBOLS: str = ""   # e.g. "BTC/USDT:USDT,ETH/USDT:USDT"
 
+    # OKX (linear USDT perpetuals via CCXT Pro). Empty = feed disabled.
+    OKX_API_KEY: str = ""
+    OKX_API_SECRET: str = ""
+    OKX_API_PASSWORD: str = ""
+    OKX_TESTNET: bool = True
+    OKX_PERP_SYMBOLS: str = ""     # e.g. "BTC/USDT:USDT,ETH/USDT:USDT"
+
+    # Kraken (spot via CCXT Pro). Empty = feed disabled.
+    KRAKEN_API_KEY: str = ""
+    KRAKEN_API_SECRET: str = ""
+    KRAKEN_SYMBOLS: str = ""       # e.g. "BTC/USD,ETH/USD"
+
     # Oanda
     OANDA_API_KEY: str = ""
     OANDA_ACCOUNT_ID: str = ""
@@ -49,6 +61,14 @@ class Settings(BaseSettings):
     @property
     def bybit_perp_list(self) -> list[str]:
         return [s.strip() for s in self.BYBIT_PERP_SYMBOLS.split(",") if s.strip()]
+
+    @property
+    def okx_perp_list(self) -> list[str]:
+        return [s.strip() for s in self.OKX_PERP_SYMBOLS.split(",") if s.strip()]
+
+    @property
+    def kraken_symbol_list(self) -> list[str]:
+        return [s.strip() for s in self.KRAKEN_SYMBOLS.split(",") if s.strip()]
 
     @property
     def oanda_instrument_list(self) -> list[str]:
