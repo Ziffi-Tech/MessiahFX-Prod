@@ -58,6 +58,7 @@ from mezna_shared.redis_client import RedisKeys, StreamNames
 from mezna_shared.regime_map import preferred_for_regime
 from mezna_shared.kelly import get_strategy_kelly_fraction, kelly_position_usd
 from mezna_shared.audit import write_audit_log
+from mezna_shared.opportunities import mark_opportunity_executed
 from .adapters import OrderRequest, OrderResult
 from .adapters.registry import AdapterRegistry
 from . import db as trade_db
@@ -799,6 +800,11 @@ async def _process(
             "paper": settings.is_paper,
         },
     )
+
+    # Mark the opportunity executed once anything filled — populates the journal
+    # funnel's execution stage (best-effort; never blocks the consumer).
+    if fills_ok > 0:
+        await mark_opportunity_executed(db_engine, opportunity_id)
 
     # ── Record outcome — real realized P&L drives edge/Kelly/drawdown; ─────────
     #    execution success/failure drives rotation (see _record_outcome).
