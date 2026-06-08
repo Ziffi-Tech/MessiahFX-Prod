@@ -26,6 +26,8 @@ from . import OrderRequest, OrderResult
 from . import paper as paper_adapter
 from . import binance as binance_adapter
 from . import bybit as bybit_adapter
+from . import okx as okx_adapter
+from . import kraken as kraken_adapter
 from . import oanda as oanda_adapter
 from . import mt5_adapter
 
@@ -104,6 +106,44 @@ class BybitAdapter:
         )
 
 
+class OkxAdapter:
+    """OKX linear USDT perpetuals via CCXT async."""
+
+    venue = "okx"
+
+    def __init__(self, exchange: Any, settings: Settings) -> None:
+        self._exchange = exchange
+        self._settings = settings
+
+    async def execute(self, order: OrderRequest) -> OrderResult:
+        if self._exchange is None:
+            raise RuntimeError("OKX exchange instance not initialised")
+        return await okx_adapter.execute(
+            order=order,
+            exchange=self._exchange,
+            fee_bps=self._settings.OKX_TAKER_FEE_BPS,
+        )
+
+
+class KrakenAdapter:
+    """Kraken spot via CCXT async."""
+
+    venue = "kraken"
+
+    def __init__(self, exchange: Any, settings: Settings) -> None:
+        self._exchange = exchange
+        self._settings = settings
+
+    async def execute(self, order: OrderRequest) -> OrderResult:
+        if self._exchange is None:
+            raise RuntimeError("Kraken exchange instance not initialised")
+        return await kraken_adapter.execute(
+            order=order,
+            exchange=self._exchange,
+            fee_bps=self._settings.KRAKEN_TAKER_FEE_BPS,
+        )
+
+
 class OandaAdapter:
     """Oanda forex/CFD via the v20 REST API."""
 
@@ -155,6 +195,8 @@ def build_registry(
     oanda_client: Any,
     mt5_client: Any,
     bybit_exchange: Any = None,
+    okx_exchange: Any = None,
+    kraken_exchange: Any = None,
 ) -> dict[str, BaseExchangeAdapter]:
     """
     Build the venue -> adapter registry from the executor's live dependencies.
@@ -167,6 +209,8 @@ def build_registry(
         PAPER: PaperAdapter(redis, settings),
         "binance": BinanceAdapter(spot_exchange, perp_exchange, settings),
         "bybit": BybitAdapter(bybit_exchange, settings),
+        "okx": OkxAdapter(okx_exchange, settings),
+        "kraken": KrakenAdapter(kraken_exchange, settings),
         "oanda": OandaAdapter(oanda_client, settings),
         "mt5": Mt5Adapter(mt5_client, settings),
     }

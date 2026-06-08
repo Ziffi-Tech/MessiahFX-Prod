@@ -38,6 +38,8 @@ from .config import settings
 from .routes import health
 from .adapters import binance as binance_adapter
 from .adapters import bybit as bybit_adapter
+from .adapters import okx as okx_adapter
+from .adapters import kraken as kraken_adapter
 from . import consumer
 
 setup_logging(
@@ -120,6 +122,8 @@ async def lifespan(app: FastAPI):
     perp_exchange = None
     oanda_client = None
     bybit_exchange = None
+    okx_exchange = None
+    kraken_exchange = None
 
     if not settings.is_paper:
         if settings.BINANCE_API_KEY and settings.BINANCE_API_SECRET:
@@ -176,6 +180,37 @@ async def lifespan(app: FastAPI):
                 "executor.bybit_not_configured",
                 hint="BYBIT_API_KEY/SECRET not set — Bybit orders will error",
             )
+
+        if settings.OKX_API_KEY and settings.OKX_API_SECRET:
+            okx_exchange = okx_adapter.make_exchange(
+                settings.OKX_API_KEY,
+                settings.OKX_API_SECRET,
+                settings.OKX_TESTNET,
+                settings.OKX_API_PASSWORD,
+            )
+            log.info(
+                "executor.okx_ready",
+                testnet=settings.OKX_TESTNET,
+                note="linear USDT perp exchange instance created",
+            )
+        else:
+            log.warning(
+                "executor.okx_not_configured",
+                hint="OKX_API_KEY/SECRET not set — OKX orders will error",
+            )
+
+        if settings.KRAKEN_API_KEY and settings.KRAKEN_API_SECRET:
+            kraken_exchange = kraken_adapter.make_exchange(
+                settings.KRAKEN_API_KEY,
+                settings.KRAKEN_API_SECRET,
+                settings.KRAKEN_TESTNET,
+            )
+            log.info("executor.kraken_ready", note="spot exchange instance created")
+        else:
+            log.warning(
+                "executor.kraken_not_configured",
+                hint="KRAKEN_API_KEY/SECRET not set — Kraken orders will error",
+            )
     else:
         log.info(
             "executor.paper_mode",
@@ -188,6 +223,8 @@ async def lifespan(app: FastAPI):
     app.state.oanda_client = oanda_client
     app.state.mt5_client = mt5_client
     app.state.bybit_exchange = bybit_exchange
+    app.state.okx_exchange = okx_exchange
+    app.state.kraken_exchange = kraken_exchange
 
     # ── Consumer task ─────────────────────────────────────────────────────────
     consumer_task = asyncio.create_task(
@@ -200,6 +237,8 @@ async def lifespan(app: FastAPI):
             oanda_client=oanda_client,
             mt5_client=mt5_client,
             bybit_exchange=bybit_exchange,
+            okx_exchange=okx_exchange,
+            kraken_exchange=kraken_exchange,
         ),
         name="executor-consumer",
     )
@@ -228,6 +267,12 @@ async def lifespan(app: FastAPI):
     if bybit_exchange is not None:
         await bybit_exchange.close()
         log.info("executor.bybit_closed")
+    if okx_exchange is not None:
+        await okx_exchange.close()
+        log.info("executor.okx_closed")
+    if kraken_exchange is not None:
+        await kraken_exchange.close()
+        log.info("executor.kraken_closed")
     if oanda_client is not None:
         await oanda_client.aclose()
         log.info("executor.oanda_client_closed")

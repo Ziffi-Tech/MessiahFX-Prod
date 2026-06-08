@@ -29,6 +29,19 @@ class Settings(BaseSettings):
     BYBIT_TESTNET: bool = True
     BYBIT_TAKER_FEE_BPS: float = 5.5    # 0.055% taker (linear perp)
 
+    # OKX (linear USDT perpetuals via CCXT). OKX also requires an API passphrase.
+    OKX_API_KEY: str = ""
+    OKX_API_SECRET: str = ""
+    OKX_API_PASSWORD: str = ""
+    OKX_TESTNET: bool = True
+    OKX_TAKER_FEE_BPS: float = 5.0     # 0.05% taker (linear perp)
+
+    # Kraken (spot via CCXT). No public sandbox — keep TRADING_MODE=paper.
+    KRAKEN_API_KEY: str = ""
+    KRAKEN_API_SECRET: str = ""
+    KRAKEN_TESTNET: bool = False
+    KRAKEN_TAKER_FEE_BPS: float = 26.0  # ~0.26% taker (spot, low-volume tier)
+
     # Oanda (v20 REST API)
     OANDA_API_KEY: str = ""
     OANDA_ACCOUNT_ID: str = ""
