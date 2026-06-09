@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Bell } from "lucide-react";
+import { Bell, Search } from "lucide-react";
 import { BotControls } from "@/components/layout/bot-controls";
 
 const ROUTE_TITLES: Record<string, string> = {
@@ -59,6 +59,18 @@ export function Topbar() {
 
       {/* Right cluster */}
       <div className="flex items-center gap-5">
+        {/* Command palette affordance */}
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new Event("mezna:command-palette"))}
+          className="hidden md:flex items-center gap-1.5 px-2 py-1 rounded text-[11px]"
+          style={{ background: "var(--bg-surface-2)", color: "var(--text-tertiary)", border: "1px solid var(--border)" }}
+          title="Command palette"
+        >
+          <Search size={12} />
+          <kbd className="mono">⌘K</kbd>
+        </button>
+
         {/* Bot lifecycle + real-time stream health */}
         <BotControls />
 

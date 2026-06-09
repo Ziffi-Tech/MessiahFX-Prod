@@ -1,12 +1,15 @@
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar }  from "@/components/layout/topbar";
 import { StreamConnector } from "@/components/trading/stream-connector";
+import { CommandPalette } from "@/components/layout/command-palette";
 
 export default function TradingLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-dvh overflow-hidden">
       {/* Opens the single app-wide SSE connection (ticks / risk / signals). */}
       <StreamConnector />
+      {/* ⌘K / Ctrl-K command palette — keyboard-first navigation + actions. */}
+      <CommandPalette />
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Topbar />
