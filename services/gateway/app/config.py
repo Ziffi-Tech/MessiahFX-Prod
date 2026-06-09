@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     AI_FILTER_URL:     str = "http://mezna-ai-filter:8005"
     MARKET_DATA_URL:   str = "http://mezna-market-data:8001"
 
+    # ── Session auth (defense in depth) ───────────────────────────────────────
+    # Shared with the dashboard. When set, the gateway VERIFIES the operator's
+    # signed token (forwarded as X-Mezna-Token) instead of trusting the
+    # X-Mezna-User/Role headers, and enforces revocation. Must match the
+    # dashboard's SESSION_SECRET.
+    SESSION_SECRET: str = ""
+    # When true, control-plane writes REQUIRE a verified token (reject header-only
+    # callers). Default false for backward compat; turn on in production.
+    GATEWAY_REQUIRE_AUTH: bool = False
+
     # ── Credential encryption ─────────────────────────────────────────────────
     # REQUIRED. Generate with:
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

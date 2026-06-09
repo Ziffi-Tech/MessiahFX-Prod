@@ -31,9 +31,10 @@ principle that matters here: **capital safety before polish.**
 
 Goal: earn the right to run the paper validation with confidence.
 
-1. **Gateway verifies the session token** (defense in depth). Have the FastAPI
-   gateway verify the HS256 token with the shared `SESSION_SECRET` instead of
-   trusting `X-Mezna-User`. Closes header-spoofing if the gateway is ever exposed.
+1. ~~**Gateway verifies the session token** (defense in depth).~~ **DONE** —
+   `mezna_shared.session` verifies the HS256 token (shared `SESSION_SECRET`) +
+   revocation; control actions attribute/authorise off the verified identity, the
+   headers are an untrusted fallback. `GATEWAY_REQUIRE_AUTH=true` to require it.
 2. **Fix the test suite + add CI.** Resolve the `app` package collision (unique
    package names or `sys.modules` isolation in conftests), then a GitHub Actions
    pipeline: lint + per-service pytest + `next build` on every PR.

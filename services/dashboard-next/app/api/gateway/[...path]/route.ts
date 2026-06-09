@@ -70,8 +70,11 @@ async function handler(
   headers.delete("host");
   headers.delete("cookie");
   // Attribute downstream actions (kill switch, toggles, …) to the real operator.
+  // Forward the signed token too so the gateway can VERIFY it (defense in depth),
+  // not just trust these headers.
   headers.set("x-mezna-user", session.sub);
   headers.set("x-mezna-role", session.role);
+  if (token) headers.set("x-mezna-token", token);
 
   let body: BodyInit | undefined;
   if (!["GET", "HEAD"].includes(req.method)) {

@@ -89,9 +89,15 @@ verifies the signature + expiry on every request.
 
 RBAC is enforced server-side in the gateway proxy route (viewer → 403 on any
 non-GET), and mirrored in the UI (BotControls + command palette hide write
-actions for viewers). After auth, the proxy forwards `X-Mezna-User` /
-`X-Mezna-Role`; the gateway control plane attributes kill-switch / start / stop /
-toggle audit records to the **real user** instead of the literal `"dashboard"`.
+actions for viewers). After auth, the proxy forwards the signed token
+(`X-Mezna-Token`) plus `X-Mezna-User` / `X-Mezna-Role`.
+
+**Defense in depth:** the FastAPI gateway *verifies* `X-Mezna-Token` itself
+(HS256 with the shared `SESSION_SECRET`) + checks revocation, and uses that
+verified identity to attribute control actions and authorise admin-only ones
+(e.g. session revocation) — the spoofable headers are only an untrusted fallback.
+Set `GATEWAY_REQUIRE_AUTH=true` to reject any control-plane write lacking a valid
+token. The gateway's `SESSION_SECRET` **must match** the dashboard's.
 
 ### Setup
 
@@ -116,7 +122,8 @@ working — set the roster to disable it.
 | Var | Where | Notes |
 |---|---|---|
 | `GATEWAY_URL` | dashboard-next | In-container: `http://gateway:8000`. All `/api/gateway/*` routes here by default. |
-| `SESSION_SECRET` | dashboard-next | HMAC key for session tokens. **Required in prod.** |
+| `SESSION_SECRET` | dashboard-next **+ gateway** | HMAC key for session tokens. **Required in prod**; the two values must match. |
+| `GATEWAY_REQUIRE_AUTH` | gateway | `true` rejects control-plane writes without a verified token. Default false. |
 | `DASHBOARD_USERS` | dashboard-next | JSON roster (see above). Empty → legacy single-password mode. |
 | `DASHBOARD_PASSWORD` | dashboard-next | Legacy fallback password (admin) when no roster. |
 | `NEXT_PUBLIC_USE_SERVICE_ROUTING` | dashboard-next (dev only) | `true` fans out to individual service ports for isolated debugging; leave unset in prod. |
