@@ -1,7 +1,7 @@
 "use client";
 
-import { Play, Square, AlertOctagon, Wifi, WifiOff } from "lucide-react";
-import { useRiskState, useKillSwitch, useBotStart, useBotStop } from "@/lib/hooks";
+import { Play, Square, AlertOctagon, Wifi, WifiOff, Eye } from "lucide-react";
+import { useRiskState, useKillSwitch, useBotStart, useBotStop, useAuth } from "@/lib/hooks";
 import { useLiveStore } from "@/lib/stores/live";
 
 /**
@@ -11,11 +11,14 @@ import { useLiveStore } from "@/lib/stores/live";
  */
 export function BotControls() {
   const { data: risk } = useRiskState();
+  const { data: auth } = useAuth();
   const liveRisk = useLiveStore((s) => s.risk);
   const connected = useLiveStore((s) => s.connected);
   const ks = useKillSwitch();
   const start = useBotStart();
   const stop = useBotStop();
+
+  const readOnly = auth?.role === "viewer";
 
   // Prefer the SSE halt flag (sub-second) and fall back to the polled risk state.
   const halted = liveRisk?.halted ?? risk?.kill_switch_active ?? false;
@@ -54,40 +57,51 @@ export function BotControls() {
         {mode}
       </span>
 
-      {/* Start / Stop */}
-      {halted ? (
-        <button
-          onClick={onStart}
-          disabled={busy}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50"
-          style={{ background: "var(--green-dim)", color: "var(--green)", border: "1px solid rgba(0,229,160,0.3)" }}
-        >
-          <Play size={12} />
-          {start.isPending ? "Starting…" : "Start"}
-        </button>
+      {readOnly ? (
+        <span className="badge badge-gray flex items-center gap-1" title="Your role is read-only">
+          <Eye size={11} /> READ-ONLY
+        </span>
       ) : (
-        <button
-          onClick={onStop}
-          disabled={busy}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50"
-          style={{ background: "var(--orange-dim)", color: "var(--orange)", border: "1px solid rgba(255,170,0,0.3)" }}
-        >
-          <Square size={12} />
-          {stop.isPending ? "Stopping…" : "Stop"}
-        </button>
-      )}
+        <>
+          {/* Start / Stop */}
+          {halted ? (
+            <button
+              type="button"
+              onClick={onStart}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50"
+              style={{ background: "var(--green-dim)", color: "var(--green)", border: "1px solid rgba(0,229,160,0.3)" }}
+            >
+              <Play size={12} />
+              {start.isPending ? "Starting…" : "Start"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onStop}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-50"
+              style={{ background: "var(--orange-dim)", color: "var(--orange)", border: "1px solid rgba(255,170,0,0.3)" }}
+            >
+              <Square size={12} />
+              {stop.isPending ? "Stopping…" : "Stop"}
+            </button>
+          )}
 
-      {/* Emergency kill — disabled when already halted */}
-      <button
-        onClick={onKill}
-        disabled={busy || halted}
-        title="Emergency kill switch"
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-semibold disabled:opacity-40"
-        style={{ background: "var(--red-dim)", color: "var(--red)", border: "1px solid rgba(255,61,87,0.3)" }}
-      >
-        <AlertOctagon size={12} />
-        Kill
-      </button>
+          {/* Emergency kill — disabled when already halted */}
+          <button
+            type="button"
+            onClick={onKill}
+            disabled={busy || halted}
+            title="Emergency kill switch"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-semibold disabled:opacity-40"
+            style={{ background: "var(--red-dim)", color: "var(--red)", border: "1px solid rgba(255,61,87,0.3)" }}
+          >
+            <AlertOctagon size={12} />
+            Kill
+          </button>
+        </>
+      )}
     </div>
   );
 }

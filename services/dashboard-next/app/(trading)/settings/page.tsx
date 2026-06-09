@@ -51,11 +51,13 @@ export default function SettingsPage() {
       <div className="panel p-5 space-y-4">
         <div className="flex items-center gap-2">
           <Key size={14} style={{ color: "var(--purple)" }} />
-          <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>Dashboard Password</span>
+          <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>Access &amp; Roles</span>
         </div>
         <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-          The dashboard password is set via the <code className="mono text-[10px] px-1 rounded" style={{ background: "var(--bg-surface-3)" }}>DASHBOARD_PASSWORD</code> environment variable.
-          Restart the dashboard container after changing it.
+          Operators are configured via the <code className="mono text-[10px] px-1 rounded" style={{ background: "var(--bg-surface-3)" }}>DASHBOARD_USERS</code> roster
+          (roles: admin / operator / viewer) signed with <code className="mono text-[10px] px-1 rounded" style={{ background: "var(--bg-surface-3)" }}>SESSION_SECRET</code>.
+          Hash passwords with <code className="mono text-[10px] px-1 rounded" style={{ background: "var(--bg-surface-3)" }}>scripts/hash-password.mjs</code>; see docs/terminal.md.
+          Restart the container after changing the roster.
         </p>
         <div className="relative">
           <input

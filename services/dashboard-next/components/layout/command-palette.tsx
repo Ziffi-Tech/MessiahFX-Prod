@@ -6,7 +6,7 @@ import {
   LayoutDashboard, TrendingUp, Settings2, BarChart3, Shield, ScrollText,
   BookOpen, Settings, Play, Square, AlertOctagon, Search, CornerDownLeft,
 } from "lucide-react";
-import { useBotStart, useBotStop, useKillSwitch } from "@/lib/hooks";
+import { useBotStart, useBotStop, useKillSwitch, useAuth } from "@/lib/hooks";
 
 interface Command {
   id: string;
@@ -24,9 +24,11 @@ interface Command {
  */
 export function CommandPalette() {
   const router = useRouter();
+  const { data: auth } = useAuth();
   const start = useBotStart();
   const stop = useBotStop();
   const kill = useKillSwitch();
+  const canAct = auth?.role !== "viewer";
 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -37,7 +39,7 @@ export function CommandPalette() {
     const nav = (id: string, label: string, icon: Command["icon"]): Command => ({
       id, label, group: "Navigate", icon, run: () => router.push(id),
     });
-    return [
+    const list: Command[] = [
       nav("/", "Dashboard", LayoutDashboard),
       nav("/positions", "Positions & P&L", TrendingUp),
       nav("/strategies", "Strategy Controls", Settings2),
@@ -46,14 +48,20 @@ export function CommandPalette() {
       nav("/journal", "Trade Journal", ScrollText),
       nav("/rag", "RAG Studio", BookOpen),
       nav("/settings", "Settings", Settings),
-      { id: "act:start", label: "Start bot (paper)", group: "Actions", icon: Play,
-        run: () => start.mutate(true) },
-      { id: "act:stop", label: "Stop bot", group: "Actions", icon: Square,
-        run: () => { if (confirm("Stop the bot? Halts trading and disables all strategies.")) stop.mutate("Stop from command palette"); } },
-      { id: "act:kill", label: "KILL — emergency halt", group: "Actions", icon: AlertOctagon, danger: true,
-        run: () => { if (confirm("EMERGENCY KILL — halt ALL trading immediately?")) kill.mutate(true); } },
     ];
-  }, [router, start, stop, kill]);
+    // Write actions are hidden for read-only (viewer) roles.
+    if (canAct) {
+      list.push(
+        { id: "act:start", label: "Start bot (paper)", group: "Actions", icon: Play,
+          run: () => start.mutate(true) },
+        { id: "act:stop", label: "Stop bot", group: "Actions", icon: Square,
+          run: () => { if (confirm("Stop the bot? Halts trading and disables all strategies.")) stop.mutate("Stop from command palette"); } },
+        { id: "act:kill", label: "KILL — emergency halt", group: "Actions", icon: AlertOctagon, danger: true,
+          run: () => { if (confirm("EMERGENCY KILL — halt ALL trading immediately?")) kill.mutate(true); } },
+      );
+    }
+    return list;
+  }, [router, start, stop, kill, canAct]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

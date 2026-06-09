@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
+import { useAuth } from "@/lib/hooks";
 import {
   LayoutDashboard,
   TrendingUp,
@@ -14,6 +15,7 @@ import {
   Settings,
   LogOut,
   Bot,
+  UserCircle2,
 } from "lucide-react";
 
 const NAV = [
@@ -32,9 +34,13 @@ const BOTTOM_NAV = [
 
 export function Sidebar() {
   const path = usePathname();
+  const { data: auth } = useAuth();
 
   const isActive = (href: string) =>
     href === "/" ? path === "/" : path.startsWith(href);
+
+  const roleBadge =
+    auth?.role === "admin" ? "badge-green" : auth?.role === "viewer" ? "badge-gray" : "badge-orange";
 
   return (
     <aside
@@ -121,6 +127,17 @@ export function Sidebar() {
         className="shrink-0 px-2 py-2 border-t space-y-0.5"
         style={{ borderColor: "var(--border)" }}
       >
+        {/* Current operator */}
+        {auth?.authenticated && (
+          <div className="flex items-center gap-2 px-3 py-2">
+            <UserCircle2 size={15} style={{ color: "var(--text-secondary)" }} />
+            <span className="text-sm font-medium truncate flex-1" style={{ color: "var(--text-primary)" }}>
+              {auth.user}
+            </span>
+            <span className={`badge ${roleBadge}`}>{auth.role?.toUpperCase()}</span>
+          </div>
+        )}
+
         {BOTTOM_NAV.map(({ href, label, icon: Icon }) => (
           <Link
             key={href}

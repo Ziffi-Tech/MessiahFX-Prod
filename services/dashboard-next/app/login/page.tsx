@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Lock, Eye, EyeOff } from "lucide-react";
+import { Lock, Eye, EyeOff, User } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [error, setError] = useState("");
@@ -19,14 +20,14 @@ export default function LoginPage() {
     const res = await fetch("/api/auth", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username, password }),
     });
 
     if (res.ok) {
       router.push("/");
       router.refresh();
     } else {
-      setError("Invalid password");
+      setError("Invalid credentials");
     }
     setLoading(false);
   }
@@ -60,11 +61,38 @@ export default function LoginPage() {
               Dashboard access
             </h2>
             <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-              Enter your dashboard password to continue
+              Sign in with your operator credentials
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+                Username
+              </label>
+              <div className="relative">
+                <User
+                  size={14}
+                  className="absolute left-3 top-1/2 -translate-y-1/2"
+                  style={{ color: "var(--text-tertiary)" }}
+                />
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Enter username"
+                  autoComplete="username"
+                  required
+                  className="w-full pl-9 pr-3 py-2.5 text-sm rounded outline-none focus:ring-1"
+                  style={{
+                    background: "var(--bg-surface-2)",
+                    border: `1px solid ${error ? "var(--red)" : "var(--border)"}`,
+                    color: "var(--text-primary)",
+                  }}
+                />
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <label className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
                 Password
@@ -106,7 +134,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={loading || !password}
+              disabled={loading || !password || !username}
               className="w-full py-2.5 rounded text-sm font-semibold transition-opacity disabled:opacity-50"
               style={{ background: "var(--blue)", color: "#fff" }}
             >

@@ -69,21 +69,61 @@ podman-compose --profile legacy-ui up -d dashboard
 - `lib/` is committed (the root `.gitignore` Python `lib/` rule is anchored to
   `/lib/` so it no longer swallows the Next.js app core).
 
+## Authentication & roles
+
+Multi-user, signed-session auth. Login issues an HMAC-SHA256 signed token (a
+minimal HS256 JWS, no dependency — runs in Edge middleware and Node alike) stored
+in the `mxauth` httpOnly cookie. The middleware ([proxy.ts](../services/dashboard-next/proxy.ts))
+verifies the signature + expiry on every request.
+
+**Users** come from `DASHBOARD_USERS` (JSON array). **Roles**:
+
+| Role | Can do |
+|---|---|
+| `admin` | Everything |
+| `operator` | Everything (read + write/control actions) |
+| `viewer` | Read-only — every mutating request is rejected 403; write UI is hidden |
+
+RBAC is enforced server-side in the gateway proxy route (viewer → 403 on any
+non-GET), and mirrored in the UI (BotControls + command palette hide write
+actions for viewers). After auth, the proxy forwards `X-Mezna-User` /
+`X-Mezna-Role`; the gateway control plane attributes kill-switch / start / stop /
+toggle audit records to the **real user** instead of the literal `"dashboard"`.
+
+### Setup
+
+```bash
+# 1. signing secret
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # → SESSION_SECRET
+
+# 2. hash each operator's password
+node services/dashboard-next/scripts/hash-password.mjs 'alice secret'        # → scrypt$...
+
+# 3. roster (env)
+DASHBOARD_USERS='[{"username":"alice","password":"scrypt$..","role":"admin"},
+                  {"username":"bob","password":"scrypt$..","role":"viewer"}]'
+```
+
+If `DASHBOARD_USERS` is empty, the terminal falls back to legacy single-password
+mode (`DASHBOARD_PASSWORD`, any username, admin role) so existing deployments keep
+working — set the roster to disable it.
+
 ## Environment
 
 | Var | Where | Notes |
 |---|---|---|
 | `GATEWAY_URL` | dashboard-next | In-container: `http://gateway:8000`. All `/api/gateway/*` routes here by default. |
+| `SESSION_SECRET` | dashboard-next | HMAC key for session tokens. **Required in prod.** |
+| `DASHBOARD_USERS` | dashboard-next | JSON roster (see above). Empty → legacy single-password mode. |
+| `DASHBOARD_PASSWORD` | dashboard-next | Legacy fallback password (admin) when no roster. |
 | `NEXT_PUBLIC_USE_SERVICE_ROUTING` | dashboard-next (dev only) | `true` fans out to individual service ports for isolated debugging; leave unset in prod. |
-| `DASHBOARD_PASSWORD` | dashboard-next | Shared password for the `mxauth` cookie gate. |
 | `CORS_ORIGINS` | gateway | Includes `http://dashboard-next:3000`; tighten to the real origin in prod. |
 
 ## Known gaps / next
 
-- **Auth is a single shared password.** No per-user accounts or RBAC, so audit
-  attribution is the literal string `"dashboard"`. Productionising multi-user auth
-  is the main remaining hardening item before external exposure.
 - Risk gauges + signal feed still poll (5–15s); they can move onto the SSE `risk`
   / `signals` frames already being broadcast.
 - No L2 depth/order-book panel (needs a CCXT Pro order-book feed).
+- Sessions are stateless (no server-side revocation list); rotate `SESSION_SECRET`
+  to invalidate all sessions. Per-user revocation would need a store.
 - Go-live gate unchanged: 4+ weeks clean paper + kill switch tested in prod.

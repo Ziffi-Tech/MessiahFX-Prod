@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { verifySession, sessionSecret, SESSION_COOKIE, canWrite } from "@/lib/auth";
 
 // ── Service routing map ────────────────────────────────────────────────────────
 // DEFAULT (production + normal dev): every request goes to the gateway, which
@@ -44,8 +45,16 @@ async function handler(
   context: { params: Promise<{ path: string[] }> }
 ) {
   const jar = await cookies();
-  if (!jar.get("mxauth")) {
+  const token = jar.get(SESSION_COOKIE)?.value;
+  const session = token ? await verifySession(token, sessionSecret()) : null;
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // RBAC: viewers are read-only — block every mutating method.
+  const isWrite = !["GET", "HEAD"].includes(req.method);
+  if (isWrite && !canWrite(session.role)) {
+    return NextResponse.json({ error: "Forbidden — your role is read-only" }, { status: 403 });
   }
 
   const { path } = await context.params;
@@ -54,6 +63,9 @@ async function handler(
   const headers = new Headers(req.headers);
   headers.delete("host");
   headers.delete("cookie");
+  // Attribute downstream actions (kill switch, toggles, …) to the real operator.
+  headers.set("x-mezna-user", session.sub);
+  headers.set("x-mezna-role", session.role);
 
   let body: BodyInit | undefined;
   if (!["GET", "HEAD"].includes(req.method)) {

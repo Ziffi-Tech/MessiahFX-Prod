@@ -32,6 +32,19 @@ router = APIRouter()
 _ALL_STRATEGIES: tuple[str, ...] = tuple(sorted(ALL_STRATEGIES))
 
 
+def _actor(request: Request, fallback: str) -> str:
+    """
+    Resolve the operator behind a control action for the audit trail.
+
+    The dashboard proxy verifies the session and forwards X-Mezna-User after
+    auth, so safety-critical actions are attributed to the real user instead of
+    a literal "dashboard". Falls back to the request-body value for non-dashboard
+    callers (scripts, direct API).
+    """
+    user = request.headers.get("x-mezna-user")
+    return user.strip() if user and user.strip() else fallback
+
+
 @router.get("/status", summary="Get current system control state")
 async def get_control_status(request: Request) -> dict:
     """Return current kill switch state and strategy toggle states."""
@@ -78,6 +91,7 @@ async def activate_kill_switch(
     """
     redis = request.app.state.redis
     activated_at = datetime.now(timezone.utc)
+    actor = _actor(request, body.activated_by)
 
     # Set halt flag in Redis — immediate effect, fastest possible read
     await redis.set(RedisKeys.HALT, "1")
@@ -93,7 +107,7 @@ async def activate_kill_switch(
     log.warning(
         "kill_switch.activated",
         reason=body.reason,
-        activated_by=body.activated_by,
+        activated_by=actor,
         activated_at=activated_at.isoformat(),
     )
 
@@ -107,7 +121,7 @@ async def activate_kill_switch(
             {
                 "event_type": "kill_switch.activated",
                 "service": "gateway",
-                "payload": json.dumps({"reason": body.reason, "activated_by": body.activated_by}),
+                "payload": json.dumps({"reason": body.reason, "activated_by": actor}),
                 "metadata": json.dumps({"activated_at": activated_at.isoformat()}),
                 "created_at": activated_at,
             },
@@ -118,7 +132,7 @@ async def activate_kill_switch(
                 VALUES ('kill_switch.activated', :description, :created_at)
             """),
             {
-                "description": f"Kill switch activated by {body.activated_by}: {body.reason}",
+                "description": f"Kill switch activated by {actor}: {body.reason}",
                 "created_at": activated_at,
             },
         )
@@ -126,7 +140,7 @@ async def activate_kill_switch(
     return {
         "halted": True,
         "reason": body.reason,
-        "activated_by": body.activated_by,
+        "activated_by": actor,
         "activated_at": activated_at.isoformat(),
         "message": "Kill switch active. All trading halted. Use /control/reset to re-enable.",
     }
@@ -154,6 +168,7 @@ async def reset_kill_switch(
 
     redis = request.app.state.redis
     reset_at = datetime.now(timezone.utc)
+    actor = _actor(request, body.reset_by)
 
     await redis.set(RedisKeys.HALT, "0")
     await redis.hset(
@@ -168,7 +183,7 @@ async def reset_kill_switch(
     log.info(
         "kill_switch.reset",
         reason=body.reason,
-        reset_by=body.reset_by,
+        reset_by=actor,
         reset_at=reset_at.isoformat(),
     )
 
@@ -181,7 +196,7 @@ async def reset_kill_switch(
             {
                 "event_type": "kill_switch.reset",
                 "service": "gateway",
-                "payload": json.dumps({"reason": body.reason, "reset_by": body.reset_by}),
+                "payload": json.dumps({"reason": body.reason, "reset_by": actor}),
                 "metadata": json.dumps({"reset_at": reset_at.isoformat()}),
                 "created_at": reset_at,
             },
@@ -190,7 +205,7 @@ async def reset_kill_switch(
     return {
         "halted": False,
         "reason": body.reason,
-        "reset_by": body.reset_by,
+        "reset_by": actor,
         "reset_at": reset_at.isoformat(),
         "message": "Kill switch cleared. Trading can resume if strategies are enabled.",
     }
@@ -213,6 +228,7 @@ async def toggle_strategy(
     """
     redis = request.app.state.redis
     toggled_at = datetime.now(timezone.utc)
+    actor = _actor(request, "dashboard")
 
     state_update: dict[str, str] = {
         "enabled": "1" if body.enabled else "0",
@@ -228,6 +244,7 @@ async def toggle_strategy(
         strategy_type=body.strategy_type,
         enabled=body.enabled,
         latency_profile=body.latency_profile,
+        toggled_by=actor,
     )
 
     async with get_async_session(request.app.state.db_engine) as session:
@@ -237,7 +254,7 @@ async def toggle_strategy(
                 SET enabled = :enabled,
                     latency_profile = COALESCE(:latency_profile, latency_profile),
                     updated_at = :updated_at,
-                    updated_by = 'dashboard'
+                    updated_by = :updated_by
                 WHERE strategy_type = :strategy_type
             """),
             {
@@ -245,6 +262,7 @@ async def toggle_strategy(
                 "latency_profile": body.latency_profile,
                 "updated_at": toggled_at,
                 "strategy_type": body.strategy_type,
+                "updated_by": actor,
             },
         )
         await session.execute(
@@ -257,6 +275,7 @@ async def toggle_strategy(
                     "strategy_type": body.strategy_type,
                     "enabled": body.enabled,
                     "latency_profile": body.latency_profile,
+                    "toggled_by": actor,
                 }),
                 "created_at": toggled_at,
             },
@@ -303,6 +322,7 @@ async def bot_start(
     """
     redis = request.app.state.redis
     started_at = datetime.now(timezone.utc)
+    actor = _actor(request, body.started_by)
     paper_flag = "1" if body.paper_mode else "0"
     mode_label = "paper" if body.paper_mode else "LIVE"
 
@@ -330,7 +350,7 @@ async def bot_start(
 
     log.info(
         "bot.started",
-        started_by=body.started_by,
+        started_by=actor,
         paper_mode=body.paper_mode,
         strategies=list(_ALL_STRATEGIES),
     )
@@ -344,7 +364,7 @@ async def bot_start(
             """),
             {
                 "payload": json.dumps({
-                    "started_by": body.started_by,
+                    "started_by": actor,
                     "paper_mode": body.paper_mode,
                     "strategies_enabled": list(_ALL_STRATEGIES),
                 }),
@@ -356,7 +376,7 @@ async def bot_start(
         "running": True,
         "mode": mode_label,
         "strategies_enabled": list(_ALL_STRATEGIES),
-        "started_by": body.started_by,
+        "started_by": actor,
         "started_at": started_at.isoformat(),
         "message": f"Bot started in {mode_label} mode. All strategies enabled.",
     }
@@ -382,6 +402,7 @@ async def bot_stop(
     """
     redis = request.app.state.redis
     stopped_at = datetime.now(timezone.utc)
+    actor = _actor(request, body.stopped_by)
 
     # 1. Activate halt
     await redis.set(RedisKeys.HALT, "1")
@@ -406,7 +427,7 @@ async def bot_stop(
 
     log.warning(
         "bot.stopped",
-        stopped_by=body.stopped_by,
+        stopped_by=actor,
         reason=body.reason,
     )
 
@@ -419,7 +440,7 @@ async def bot_stop(
             """),
             {
                 "payload": json.dumps({
-                    "stopped_by": body.stopped_by,
+                    "stopped_by": actor,
                     "reason": body.reason,
                     "strategies_disabled": list(_ALL_STRATEGIES),
                 }),
@@ -432,7 +453,7 @@ async def bot_stop(
                 VALUES ('bot.stopped', :description, :created_at)
             """),
             {
-                "description": f"Bot stopped by {body.stopped_by}: {body.reason}",
+                "description": f"Bot stopped by {actor}: {body.reason}",
                 "created_at": stopped_at,
             },
         )
@@ -440,7 +461,7 @@ async def bot_stop(
     return {
         "running": False,
         "strategies_disabled": list(_ALL_STRATEGIES),
-        "stopped_by": body.stopped_by,
+        "stopped_by": actor,
         "reason": body.reason,
         "stopped_at": stopped_at.isoformat(),
         "message": "Bot stopped. Kill switch active. Open positions NOT automatically closed.",

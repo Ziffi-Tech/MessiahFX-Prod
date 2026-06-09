@@ -16,6 +16,16 @@ export const QK = {
   digest:           ["ai", "digest"]       as const,
 } as const;
 
+// ── Current user (whoami) ───────────────────────────────────────────────────
+export function useAuth() {
+  return useQuery({
+    queryKey: ["auth", "me"],
+    queryFn: () => api.auth.me(),
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
 // ── Health ────────────────────────────────────────────────────────────────────
 export function useHealth() {
   return useQuery({

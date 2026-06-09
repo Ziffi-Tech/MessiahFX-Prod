@@ -7,6 +7,9 @@ import type {
   GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
+import type { Role } from "@/lib/auth";
+
+export interface AuthMe { authenticated: boolean; user?: string; role?: Role; }
 
 const BASE = "/api/gateway";
 
@@ -129,6 +132,15 @@ export const api = {
         status: string; venue: string; symbol: string; interval: string;
         count: number; candles: OHLCVCandle[];
       }>("GET", `/backtest/ohlcv${q ? `?${q}` : ""}`);
+    },
+  },
+
+  // ── Auth (not under the gateway proxy) ───────────────────────────────────────
+  auth: {
+    me: async (): Promise<AuthMe> => {
+      const res = await fetch("/api/auth", { cache: "no-store" });
+      if (!res.ok) return { authenticated: false };
+      return res.json() as Promise<AuthMe>;
     },
   },
 
