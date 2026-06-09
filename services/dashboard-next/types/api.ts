@@ -259,6 +259,26 @@ export interface StrategyOverview {
   timestamp: string;
 }
 
+// ── Go-live readiness ──────────────────────────────────────────────────────
+
+export interface ReadinessCriterion {
+  name: string;
+  pass: boolean;
+  value: number;
+  threshold: number;
+  detail: string;
+}
+
+export interface ReadinessResult {
+  ready: boolean;
+  evaluated_at: string;
+  days_in_paper: number;
+  thresholds: { min_paper_days: number; min_trades: number };
+  criteria: ReadinessCriterion[];
+  advisory: ReadinessCriterion[];
+  summary: Record<string, number>;
+}
+
 // ── L2 order book (depth ladder / DOM) ─────────────────────────────────────
 
 export interface OrderBook {

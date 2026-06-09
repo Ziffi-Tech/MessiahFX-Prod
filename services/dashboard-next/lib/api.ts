@@ -5,6 +5,7 @@ import type {
   StrategyConfig, RiskState, RagQuery, RagResponse,
   StrategyProfile, BacktestResult, MonteCarloResult,
   GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle, OrderBook,
+  ReadinessResult,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
 import type { Role } from "@/lib/auth";
@@ -186,6 +187,7 @@ export const api = {
       req<{ opportunities: Opportunity[] }>(
         "GET", `/journal/opportunities?limit=${limit}`
       ),
+    readiness: () => req<ReadinessResult>("GET", "/journal/readiness"),
   },
 
   // ── Strategies ─────────────────────────────────────────────────────────────

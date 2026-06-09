@@ -441,6 +441,113 @@ async def kelly_stats(
     }
 
 
+# ── Go-live readiness ─────────────────────────────────────────────────────────
+
+_READINESS_TRADES = text("""
+    SELECT
+        COUNT(*) FILTER (WHERE status = 'filled')                                   AS filled_trades,
+        COUNT(*) FILTER (WHERE status = 'filled' AND realized_pnl IS NOT NULL
+                         AND realized_pnl <> 0)                                     AS closed_trades,
+        COUNT(*) FILTER (WHERE status = 'filled' AND paper_mode = false)            AS live_fills,
+        MIN(filled_at) FILTER (WHERE status = 'filled')                             AS first_fill
+    FROM trades
+""")
+
+_READINESS_AUDIT = text("""
+    SELECT
+        COUNT(*) FILTER (WHERE event_type = 'kill_switch.activated')                AS kill_tests,
+        COUNT(*) FILTER (WHERE event_type = 'bot.started')                          AS bot_starts,
+        MIN(created_at) FILTER (WHERE event_type IN ('bot.started', 'kill_switch.activated')) AS first_activity
+    FROM audit_log
+""")
+
+_READINESS_RISK = text("""
+    SELECT COUNT(*) AS breach_events
+    FROM risk_events
+    WHERE event_type ILIKE '%drawdown%' OR event_type ILIKE '%limit%' OR event_type ILIKE '%breach%'
+""")
+
+
+async def go_live_readiness(
+    db_engine: AsyncEngine,
+    *,
+    min_paper_days: int = 28,
+    min_trades: int = 50,
+) -> dict:
+    """
+    Evaluate the go-live gate from real activity and return a pass/fail checklist.
+
+    Critical criteria (all must pass for ``ready``):
+      - paper_duration       : ≥ min_paper_days days of paper activity
+      - kill_switch_tested   : at least one kill-switch activation on record
+      - sufficient_trades    : ≥ min_trades filled trades (statistical meaning)
+      - round_trips_closed   : ≥ 1 position closed (realized P&L is populated)
+      - still_paper          : zero live fills (no accidental live trading)
+
+    Advisory (surfaced, not gating):
+      - risk_breaches        : count of drawdown/limit breach risk events
+    """
+    async with get_async_session(db_engine) as session:
+        t = _row_to_dict((await session.execute(_READINESS_TRADES)).fetchone())
+        a = _row_to_dict((await session.execute(_READINESS_AUDIT)).fetchone())
+        r = _row_to_dict((await session.execute(_READINESS_RISK)).fetchone())
+
+    filled = int(t.get("filled_trades", 0) or 0)
+    closed = int(t.get("closed_trades", 0) or 0)
+    live_fills = int(t.get("live_fills", 0) or 0)
+    kill_tests = int(a.get("kill_tests", 0) or 0)
+    breaches = int(r.get("breach_events", 0) or 0)
+
+    # Earliest paper activity = first fill or first bot.started/kill event.
+    starts: list[datetime] = []
+    for key, src in (("first_fill", t), ("first_activity", a)):
+        raw = src.get(key)
+        if raw:
+            dt = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            starts.append(dt)
+    first = min(starts) if starts else None
+    days_in_paper = (datetime.now(timezone.utc) - first).days if first else 0
+
+    def crit(name: str, ok: bool, value, threshold, detail: str) -> dict:
+        return {"name": name, "pass": bool(ok), "value": value, "threshold": threshold, "detail": detail}
+
+    criteria = [
+        crit("paper_duration", days_in_paper >= min_paper_days, days_in_paper, min_paper_days,
+             f"{days_in_paper} of {min_paper_days} days of paper activity"),
+        crit("kill_switch_tested", kill_tests >= 1, kill_tests, 1,
+             "kill switch exercised at least once" if kill_tests else "never tested — run a kill/reset cycle"),
+        crit("sufficient_trades", filled >= min_trades, filled, min_trades,
+             f"{filled} of {min_trades} filled trades"),
+        crit("round_trips_closed", closed >= 1, closed, 1,
+             "positions have closed (realized P&L tracked)" if closed else "no round trips closed yet"),
+        crit("still_paper", live_fills == 0, live_fills, 0,
+             "no live fills" if live_fills == 0 else f"{live_fills} LIVE fills present — investigate"),
+    ]
+    advisory = [
+        crit("risk_breaches", breaches == 0, breaches, 0,
+             "no drawdown/limit breach events" if breaches == 0 else f"{breaches} breach event(s) — review before live"),
+    ]
+
+    ready = all(c["pass"] for c in criteria)
+    return {
+        "ready": ready,
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "days_in_paper": days_in_paper,
+        "thresholds": {"min_paper_days": min_paper_days, "min_trades": min_trades},
+        "criteria": criteria,
+        "advisory": advisory,
+        "summary": {
+            "filled_trades": filled,
+            "closed_trades": closed,
+            "live_fills": live_fills,
+            "kill_switch_tests": kill_tests,
+            "risk_breach_events": breaches,
+        },
+    }
+
+
 # ── Opportunity funnel ────────────────────────────────────────────────────────
 
 _FUNNEL = text("""
