@@ -31,6 +31,7 @@ from .config import settings
 from .routes import health, backtest
 from .routes import compare
 from .routes import regime_backtest
+from .routes import ohlcv
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -96,5 +97,6 @@ app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(backtest.router,         tags=["backtest"])
 app.include_router(compare.router,          tags=["compare"])
 app.include_router(regime_backtest.router,  tags=["regime-backtest"])
+app.include_router(ohlcv.router,            tags=["ohlcv"])
 
 setup_metrics(app, service_name=settings.SERVICE_NAME)

@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 
 import httpx
 import structlog
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -45,6 +45,12 @@ class StatArbRequest(BaseModel):
     exit_z: float = Field(0.5, ge=0.0, description="Z-score exit threshold")
     capital_usd: float = Field(5000.0, gt=0)
     fee_bps: float = Field(7.5, gt=0)
+    # Data source: "binance" = live REST (default behaviour); "db" = persisted
+    # ohlcv_bars only; "auto" = DB when available + populated, else REST. For the
+    # DB path, spot_symbol/perp_symbol are ccxt unified symbols (e.g. BTC/USDT,
+    # BTC/USDT:USDT) under `venue`.
+    source: str = Field("auto", pattern="^(auto|binance|db)$")
+    venue: str = Field("binance", description="Venue for the DB source")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -59,6 +65,43 @@ def _result_to_dict(result: engine.BacktestResult) -> dict:
     d = vars(result).copy()
     # trade_log and equity_curve are already lists of dicts (via vars(TradeRecord))
     return d
+
+
+async def _load_stat_arb_candles(
+    body: "StatArbRequest", request: Request, start_ms: int, end_ms: int
+) -> tuple[list[dict] | None, list[dict] | None, str]:
+    """
+    Load spot + perp candles for a stat-arb run, honouring body.source.
+
+    Returns (spot, perp, data_source). When source resolves to the DB but no
+    persisted bars exist, returns (None, None, "db") so an explicit db request can
+    surface a clear error; "auto"/"binance" then fall through to the REST fetch.
+    """
+    db_engine = getattr(request.app.state, "db_engine", None)
+    want_db = body.source == "db" or (body.source == "auto" and db_engine is not None)
+
+    if want_db and db_engine is not None:
+        spot = await data_fetcher.fetch_candles_from_db(
+            db_engine, body.venue, body.spot_symbol, body.interval, start_ms, end_ms
+        )
+        perp = await data_fetcher.fetch_candles_from_db(
+            db_engine, body.venue, body.perp_symbol, body.interval, start_ms, end_ms
+        )
+        if spot and perp:
+            return spot, perp, "db"
+        if body.source == "db":
+            return None, None, "db"   # explicit DB request, no data → caller 404s
+
+    async with httpx.AsyncClient() as client:
+        spot, perp = await _fetch_with_error(
+            data_fetcher.fetch_candles(
+                client, svc_settings, body.spot_symbol, body.interval, start_ms, end_ms
+            ),
+            data_fetcher.fetch_perp_candles(
+                client, svc_settings, body.perp_symbol, body.interval, start_ms, end_ms
+            ),
+        )
+    return spot, perp, "binance"
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -114,19 +157,21 @@ async def run_funding_arb(body: FundingArbRequest) -> JSONResponse:
 
 
 @router.post("/stat-arb")
-async def run_stat_arb(body: StatArbRequest) -> JSONResponse:
+async def run_stat_arb(body: StatArbRequest, request: Request) -> JSONResponse:
     """
     Run a statistical arbitrage backtest on spot vs perp spread.
 
-    Downloads both spot and perp candles, computes rolling z-score of the
-    price spread, and simulates entry/exit based on z-score thresholds.
+    Loads spot and perp candles (from persisted ohlcv_bars or Binance REST — see
+    `source`), computes the rolling z-score of the price spread, and simulates
+    entry/exit based on z-score thresholds.
 
     Strategy:
       z > entry_z → sell spot, buy perp (spot is overpriced)
       z < -entry_z → buy spot, sell perp (perp is overpriced)
       |z| < exit_z → close both legs (spread reverted to mean)
 
-    Returns: trade log, equity curve, Sharpe ratio, max drawdown, win rate.
+    Returns: trade log, equity curve, Sharpe ratio, max drawdown, win rate,
+    and `data_source` (db | binance).
     """
     start_ms, end_ms = _date_range_ms(body.days)
 
@@ -138,16 +183,23 @@ async def run_stat_arb(body: StatArbRequest) -> JSONResponse:
         days=body.days,
         window=body.window,
         entry_z=body.entry_z,
+        source=body.source,
     )
 
-    async with httpx.AsyncClient() as client:
-        spot_candles, perp_candles = await _fetch_with_error(
-            data_fetcher.fetch_candles(
-                client, svc_settings, body.spot_symbol, body.interval, start_ms, end_ms
-            ),
-            data_fetcher.fetch_perp_candles(
-                client, svc_settings, body.perp_symbol, body.interval, start_ms, end_ms
-            ),
+    spot_candles, perp_candles, data_source = await _load_stat_arb_candles(
+        body, request, start_ms, end_ms
+    )
+    if spot_candles is None or perp_candles is None:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={
+                "status": "error",
+                "detail": (
+                    f"no persisted OHLCV for {body.venue}:{body.spot_symbol}/"
+                    f"{body.perp_symbol} interval={body.interval}. Backfill first "
+                    f"(POST market-data /backfill) or use source=binance."
+                ),
+            },
         )
 
     result = engine.run_stat_arb(
@@ -163,7 +215,9 @@ async def run_stat_arb(body: StatArbRequest) -> JSONResponse:
     result.symbol = f"{body.spot_symbol}/{body.perp_symbol}"
     result.interval = body.interval
 
-    return JSONResponse(content=_result_to_dict(result))
+    d = _result_to_dict(result)
+    d["data_source"] = data_source
+    return JSONResponse(content=d)
 
 
 @router.get("/symbols")
