@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     # Tick cache config
     TICK_CACHE_MAX_SIZE: int = 500  # Max ticks to keep per symbol in Redis
 
+    # ── Live OHLCV bar writer ─────────────────────────────────────────────────
+    # Resamples the tick cache into completed candles and persists them to
+    # ohlcv_bars (see app/bar_writer.py). ON by default — builds the history that
+    # backtests and the directional bar-mode strategies need. Idempotent + best-
+    # effort: a DB blip is logged and retried next cycle, never breaks the feeds.
+    BAR_WRITER_ENABLED: bool = True
+    BAR_WRITER_INTERVAL_SECONDS: int = 60  # how often to flush completed bars
+    BAR_WRITER_BAR_SECONDS: int = 60       # candle width (60s = "1m" bars)
+
     @property
     def binance_spot_list(self) -> list[str]:
         return [s.strip() for s in self.BINANCE_SPOT_SYMBOLS.split(",") if s.strip()]
@@ -73,6 +82,26 @@ class Settings(BaseSettings):
     @property
     def oanda_instrument_list(self) -> list[str]:
         return [i.strip() for i in self.OANDA_INSTRUMENTS.split(",") if i.strip()]
+
+    @property
+    def bar_writer_targets(self) -> list[tuple[str, str]]:
+        """
+        (venue, symbol) pairs the bar writer persists — every configured feed
+        symbol, keyed by the same venue the feed publishes under. Disabled feeds
+        contribute nothing (their symbol lists are empty).
+        """
+        targets: list[tuple[str, str]] = []
+        for s in self.binance_spot_list + self.binance_perp_list:
+            targets.append(("binance", s))
+        for s in self.bybit_perp_list:
+            targets.append(("bybit", s))
+        for s in self.okx_perp_list:
+            targets.append(("okx", s))
+        for s in self.kraken_symbol_list:
+            targets.append(("kraken", s))
+        for s in self.oanda_instrument_list:
+            targets.append(("oanda", s))
+        return targets
 
     @property
     def oanda_base_url(self) -> str:

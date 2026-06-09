@@ -31,6 +31,7 @@ from mezna_shared.redis_client import get_redis, close_redis
 from .config import settings
 from .routes import health
 from .feeds import binance_feed, oanda_feed, bybit_feed, okx_feed, kraken_feed
+from . import bar_writer
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -117,6 +118,15 @@ async def lifespan(app: FastAPI):
     )
     kraken_task.add_done_callback(_on_feed_task_done)
     _feed_tasks.append(kraken_task)
+
+    # Live bar writer — resamples the tick cache into persisted OHLCV candles.
+    # Tracked alongside the feeds so it is cancelled + awaited on shutdown.
+    bar_writer_task = asyncio.create_task(
+        bar_writer.run(settings, app.state.redis, app.state.db_engine),
+        name="bar_writer",
+    )
+    bar_writer_task.add_done_callback(_on_feed_task_done)
+    _feed_tasks.append(bar_writer_task)
 
     log.info(
         "service.ready",
