@@ -1,39 +1,48 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { api } from "@/lib/api";
+import { useLiveStore, tickKey, type LiveTick } from "@/lib/stores/live";
 
-// Simulated price ticks — real data will come from market-data service
-// via WebSocket once the gateway WS endpoint is added
-const SYMBOLS = [
-  { symbol: "BTC/USDT",  venue: "binance", price: 67420.50, change: 1.24 },
-  { symbol: "ETH/USDT",  venue: "binance", price: 3842.10, change: -0.88 },
-  { symbol: "EUR/USD",   venue: "oanda",   price: 1.08234, change: 0.12 },
-  { symbol: "GBP/USD",   venue: "oanda",   price: 1.27105, change: -0.05 },
-];
+function displaySymbol(t: LiveTick): string {
+  // Oanda uses EUR_USD; show the conventional EUR/USD.
+  return t.venue === "oanda" ? t.symbol.replace("_", "/") : t.symbol;
+}
 
-interface Tick {
-  symbol: string;
-  venue: string;
-  price: number;
-  change: number;
+function isFx(t: LiveTick): boolean {
+  return t.market_type === "forex" || t.venue === "oanda";
+}
+
+function fmtPrice(value: number | null, fx: boolean): string {
+  if (value == null) return "—";
+  const d = fx ? 5 : 2;
+  return value.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+
+function dirColor(dir?: number): string {
+  if (dir === 1) return "var(--green)";
+  if (dir === -1) return "var(--red)";
+  return "var(--text-tertiary)";
 }
 
 export function PriceGrid() {
-  const [ticks, setTicks] = useState<Tick[]>(SYMBOLS);
+  // First-paint snapshot + slow polling fallback in case the SSE stream drops.
+  const { data: snapshot } = useQuery({
+    queryKey: ["market", "ticks", "latest"],
+    queryFn: () => api.market.ticksLatest(),
+    refetchInterval: 15_000,
+  });
 
-  // Simulate price movement until WS is wired up
-  useEffect(() => {
-    const id = setInterval(() => {
-      setTicks((prev) =>
-        prev.map((t) => ({
-          ...t,
-          price: t.price * (1 + (Math.random() - 0.5) * 0.001),
-        }))
-      );
-    }, 2000);
-    return () => clearInterval(id);
-  }, []);
+  const liveTicks = useLiveStore((s) => s.ticks);
+  const connected = useLiveStore((s) => s.connected);
+
+  // Snapshot defines the symbol set + stable order; live store overlays updates.
+  const rows = useMemo<LiveTick[]>(() => {
+    const base = snapshot?.ticks ?? [];
+    return base.map((t) => liveTicks[tickKey(t.venue, t.symbol)] ?? t);
+  }, [snapshot, liveTicks]);
 
   return (
     <div className="panel">
@@ -45,35 +54,53 @@ export function PriceGrid() {
           Market Prices
         </span>
         <div className="flex items-center gap-1.5">
-          <span className="live-dot" />
-          <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>LIVE</span>
+          <span
+            className="live-dot"
+            style={!connected ? { background: "var(--text-tertiary)" } : undefined}
+          />
+          <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+            {connected ? "LIVE" : "CONNECTING"}
+          </span>
         </div>
       </div>
-      <div className="grid grid-cols-2 divide-x divide-y" style={{ borderColor: "var(--border-subtle)" }}>
-        {ticks.map((t) => (
-          <div key={t.symbol} className="p-4 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                {t.symbol}
-              </span>
-              <span className="text-[10px] badge badge-gray">{t.venue.toUpperCase()}</span>
-            </div>
-            <div className="mono text-base font-bold" style={{ color: "var(--text-primary)" }}>
-              {t.price.toLocaleString("en-US", {
-                minimumFractionDigits: t.symbol.includes("USD/") || t.symbol.includes("/USD") ? 5 : 2,
-                maximumFractionDigits: t.symbol.includes("USD/") || t.symbol.includes("/USD") ? 5 : 2,
-              })}
-            </div>
-            <div
-              className="flex items-center gap-1 text-xs mono"
-              style={{ color: t.change >= 0 ? "var(--green)" : "var(--red)" }}
-            >
-              {t.change >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
-              {t.change >= 0 ? "+" : ""}{t.change.toFixed(2)}%
-            </div>
-          </div>
-        ))}
-      </div>
+
+      {rows.length === 0 ? (
+        <div className="p-6 text-center text-xs" style={{ color: "var(--text-tertiary)" }}>
+          Waiting for market-data feed…
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 divide-x divide-y" style={{ borderColor: "var(--border-subtle)" }}>
+          {rows.map((t) => {
+            const fx = isFx(t);
+            const arrow =
+              t.dir === 1 ? <TrendingUp size={11} /> :
+              t.dir === -1 ? <TrendingDown size={11} /> :
+              <Minus size={11} />;
+            return (
+              <div key={tickKey(t.venue, t.symbol)} className="p-4 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+                    {displaySymbol(t)}
+                  </span>
+                  <span className="text-[10px] badge badge-gray">{t.venue.toUpperCase()}</span>
+                </div>
+                <div className="mono text-base font-bold" style={{ color: dirColor(t.dir) }}>
+                  {fmtPrice(t.mid ?? t.bid, fx)}
+                </div>
+                <div className="flex items-center justify-between text-[10px] mono" style={{ color: "var(--text-tertiary)" }}>
+                  <span className="flex items-center gap-1" style={{ color: dirColor(t.dir) }}>
+                    {arrow}
+                    {t.spread_bps != null ? `${t.spread_bps.toFixed(1)} bps` : "—"}
+                  </span>
+                  <span>
+                    {fmtPrice(t.bid, fx)} / {fmtPrice(t.ask, fx)}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

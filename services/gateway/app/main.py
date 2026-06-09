@@ -25,7 +25,7 @@ from mezna_shared.credential_store import CredentialStore
 from mezna_shared.metrics import setup_metrics
 
 from .config import settings
-from .routes import health, signals, control, credentials, proxy
+from .routes import health, signals, control, credentials, proxy, stream
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -123,6 +123,8 @@ app.include_router(health.router,       prefix="/health",            tags=["heal
 app.include_router(signals.router,      prefix="/api/v1/signals",    tags=["signals"])
 app.include_router(control.router,      prefix="/api/v1/control",    tags=["control"])
 app.include_router(credentials.router,  prefix="/api/v1/credentials",tags=["credentials"])
+# Real-time SSE spine — registered before the catch-all proxy.
+app.include_router(stream.router,       tags=["stream"])
 # Service reverse proxy — must be last (catch-all path)
 app.include_router(proxy.router,        tags=["proxy"])
 

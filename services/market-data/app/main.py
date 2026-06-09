@@ -29,7 +29,7 @@ from mezna_shared.db import get_engine, check_db_connection, dispose_engine
 from mezna_shared.redis_client import get_redis, close_redis
 
 from .config import settings
-from .routes import health, backfill
+from .routes import health, backfill, ticks
 from .feeds import binance_feed, oanda_feed, bybit_feed, okx_feed, kraken_feed
 from . import bar_writer
 
@@ -172,6 +172,7 @@ app = FastAPI(
 
 app.include_router(health.router, prefix="/health", tags=["health"])
 app.include_router(backfill.router, tags=["backfill"])
+app.include_router(ticks.router, tags=["ticks"])
 
 from mezna_shared.metrics import setup_metrics
 setup_metrics(app, service_name=settings.SERVICE_NAME)

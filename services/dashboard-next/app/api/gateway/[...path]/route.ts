@@ -2,15 +2,18 @@ import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
 // ── Service routing map ────────────────────────────────────────────────────────
-// In production (containerised): all traffic goes to gateway which proxies internally.
-// In development (host-side next dev): route directly to each service's host port.
-// GATEWAY_URL env var switches the mode — if it points to the real gateway,
-// the gateway handles proxy. If unset, we fan-out to individual service ports.
+// DEFAULT (production + normal dev): every request goes to the gateway, which
+// reverse-proxies to the internal services (see gateway/app/routes/proxy.py).
+// This is the only correct behaviour inside the container, where the individual
+// services are NOT reachable on localhost — only the gateway is.
+//
+// OPT-IN (host-side next dev WITHOUT the gateway running): set
+// NEXT_PUBLIC_USE_SERVICE_ROUTING=true to fan out directly to each service's
+// host port instead. Used rarely, for isolated single-service debugging.
 
 const GATEWAY = process.env.GATEWAY_URL ?? "http://localhost:8080";
+const USE_SERVICE_ROUTING = process.env.NEXT_PUBLIC_USE_SERVICE_ROUTING === "true";
 
-// Individual service base URLs (used when NEXT_PUBLIC_USE_SERVICE_ROUTING=true
-// or when the path prefix matches a known service that the gateway doesn't proxy)
 const SERVICE_PORTS: Record<string, string> = {
   "journal":     process.env.JOURNAL_URL      ?? "http://localhost:8006",
   "risk":        process.env.RISK_URL         ?? "http://localhost:8003",
@@ -24,15 +27,15 @@ function resolveUpstream(pathSegments: string[]): string {
   if (!pathSegments.length) return GATEWAY;
   const prefix = pathSegments[0];
 
-  // If a dedicated env var is set for this prefix, use it (service direct routing)
-  if (prefix in SERVICE_PORTS) {
+  // Opt-in direct service routing for isolated host-side dev only.
+  if (USE_SERVICE_ROUTING && prefix in SERVICE_PORTS) {
     const base = SERVICE_PORTS[prefix];
-    // Rest of path after prefix
     const rest = pathSegments.slice(1).join("/");
     return rest ? `${base}/${rest}` : base;
   }
 
-  // Fallback: everything else goes to the gateway (health, control, signals, etc.)
+  // Default: the gateway proxies everything (health, control, signals, journal,
+  // risk, strategy, backtest, ai, market-data, and the /stream SSE endpoint).
   return `${GATEWAY}/${pathSegments.join("/")}`;
 }
 
