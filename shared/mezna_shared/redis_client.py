@@ -100,6 +100,13 @@ class RedisKeys:
         clean_symbol = symbol.replace("/", "_").replace(":", "_")
         return f"tick:latest:{venue}:{clean_symbol}"
 
+    # String (JSON): latest L2 order-book snapshot per symbol (top-N levels).
+    # Written with a short TTL so a dead order-book feed's book disappears.
+    @staticmethod
+    def order_book(venue: str, symbol: str) -> str:
+        clean_symbol = symbol.replace("/", "_").replace(":", "_")
+        return f"orderbook:{venue}:{clean_symbol}"
+
     # Last heartbeat timestamp per feed
     @staticmethod
     def feed_heartbeat(venue: str) -> str:

@@ -259,6 +259,17 @@ export interface StrategyOverview {
   timestamp: string;
 }
 
+// ── L2 order book (depth ladder / DOM) ─────────────────────────────────────
+
+export interface OrderBook {
+  status?: string;
+  venue: string;
+  symbol: string;
+  ts: string;
+  bids: [number, number][];   // [price, amount], price descending
+  asks: [number, number][];   // [price, amount], price ascending
+}
+
 // ── OHLCV candles (persisted bars → lightweight-charts) ────────────────────
 
 export interface OHLCVCandle {

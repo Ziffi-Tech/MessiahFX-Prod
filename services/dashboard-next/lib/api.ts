@@ -4,7 +4,7 @@ import type {
   Trade, PnLSummary, Opportunity,
   StrategyConfig, RiskState, RagQuery, RagResponse,
   StrategyProfile, BacktestResult, MonteCarloResult,
-  GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle,
+  GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle, OrderBook,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
 import type { Role } from "@/lib/auth";
@@ -133,6 +133,12 @@ export const api = {
         count: number; candles: OHLCVCandle[];
       }>("GET", `/backtest/ohlcv${q ? `?${q}` : ""}`);
     },
+    // L2 order book (depth ladder). 404 when ORDERBOOK_SYMBOLS excludes this symbol.
+    orderbook: (venue: string, symbol: string) =>
+      req<OrderBook>(
+        "GET",
+        `/market-data/orderbook/latest?venue=${encodeURIComponent(venue)}&symbol=${encodeURIComponent(symbol)}`,
+      ),
   },
 
   // ── Auth (not under the gateway proxy) ───────────────────────────────────────

@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     # Tick cache config
     TICK_CACHE_MAX_SIZE: int = 500  # Max ticks to keep per symbol in Redis
 
+    # ── L2 order-book feed (depth ladder for the terminal DOM panel) ──────────
+    # CCXT Pro watch_order_book → orderbook:{venue}:{symbol} JSON snapshot.
+    # Public data (no keys), mainnet for liquid books. Empty = disabled.
+    # Format: "<venue>:<symbol>" comma list, e.g. "binance:BTC/USDT,bybit:BTC/USDT:USDT"
+    ORDERBOOK_SYMBOLS: str = ""
+    ORDERBOOK_DEPTH: int = 20          # levels per side to publish
+    ORDERBOOK_THROTTLE_MS: int = 250   # min ms between publishes per symbol
+    ORDERBOOK_TTL_SECONDS: int = 15    # snapshot expiry — staleness detection
+
     # ── Live OHLCV bar writer ─────────────────────────────────────────────────
     # Resamples the tick cache into completed candles and persists them to
     # ohlcv_bars (see app/bar_writer.py). ON by default — builds the history that
@@ -102,6 +111,28 @@ class Settings(BaseSettings):
         for s in self.oanda_instrument_list:
             targets.append(("oanda", s))
         return targets
+
+    @property
+    def orderbook_targets(self) -> list[tuple[str, str]]:
+        """(venue, symbol) pairs to stream order books for. Empty = disabled."""
+        targets: list[tuple[str, str]] = []
+        for spec in self.ORDERBOOK_SYMBOLS.split(","):
+            spec = spec.strip()
+            if not spec or ":" not in spec:
+                continue
+            venue, symbol = spec.split(":", 1)
+            venue, symbol = venue.strip().lower(), symbol.strip()
+            if venue and symbol:
+                targets.append((venue, symbol))
+        return targets
+
+    @property
+    def orderbook_by_venue(self) -> dict[str, list[str]]:
+        """Order-book targets grouped by venue (one exchange client per venue)."""
+        grouped: dict[str, list[str]] = {}
+        for venue, symbol in self.orderbook_targets:
+            grouped.setdefault(venue, []).append(symbol)
+        return grouped
 
     @property
     def oanda_base_url(self) -> str:
