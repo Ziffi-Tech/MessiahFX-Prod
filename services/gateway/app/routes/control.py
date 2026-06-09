@@ -20,11 +20,16 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from mezna_shared.redis_client import RedisKeys
+from mezna_shared.regime_map import ALL_STRATEGIES
 from mezna_shared.schemas.risk import KillSwitchRequest, KillSwitchResetRequest, StrategyToggleRequest
 from mezna_shared.db import get_async_session
 
 log = structlog.get_logger()
 router = APIRouter()
+
+# Canonical strategy set (6) — single source of truth so the control plane never
+# silently ignores newer strategies. Sorted for deterministic ordering in logs.
+_ALL_STRATEGIES: tuple[str, ...] = tuple(sorted(ALL_STRATEGIES))
 
 
 @router.get("/status", summary="Get current system control state")
@@ -36,7 +41,7 @@ async def get_control_status(request: Request) -> dict:
     risk_state = await redis.hgetall(RedisKeys.RISK_STATE)
 
     strategy_states = {}
-    for strategy in ("funding_arb", "stat_arb", "swing"):
+    for strategy in _ALL_STRATEGIES:
         state = await redis.hgetall(RedisKeys.strategy_state(strategy))
         strategy_states[strategy] = {
             "enabled": state.get("enabled", "0") == "1",
@@ -265,8 +270,6 @@ async def toggle_strategy(
 
 
 # ── Bot START / STOP ──────────────────────────────────────────────────────────
-
-_ALL_STRATEGIES = ("funding_arb", "stat_arb", "swing")
 
 
 class BotStartRequest(BaseModel):

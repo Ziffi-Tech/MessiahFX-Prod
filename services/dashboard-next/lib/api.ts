@@ -58,6 +58,15 @@ interface RawPnLSummary {
   total_fees: number;
   realized_pnl: number;
   net_pnl: number;
+  // Performance stats (added to /journal/pnl/summary). win_rate is a 0..1 fraction.
+  winning_trades?: number;
+  losing_trades?: number;
+  win_rate?: number;
+  average_win?: number;
+  average_loss?: number;
+  profit_factor?: number | null;
+  max_drawdown_pct?: number;
+  sharpe_ratio?: number | null;
 }
 
 // ── Normalisers ────────────────────────────────────────────────────────────────
@@ -82,16 +91,16 @@ function normaliseRiskState(raw: RawRiskState): RiskState {
 
 function normalisePnL(raw: RawPnLSummary): PnLSummary {
   return {
-    total_realized_pnl: raw.net_pnl       ?? 0,
-    total_trades:       raw.total_fills   ?? 0,
-    winning_trades: 0,
-    losing_trades:  0,
-    win_rate:        0,
-    average_win:     0,
-    average_loss:    0,
-    profit_factor:   1,
-    max_drawdown_pct: 0,
-    sharpe_ratio:    null,
+    total_realized_pnl: raw.net_pnl        ?? 0,
+    total_trades:       raw.total_fills    ?? 0,
+    winning_trades:     raw.winning_trades ?? 0,
+    losing_trades:      raw.losing_trades  ?? 0,
+    win_rate:          (raw.win_rate ?? 0) * 100,   // backend sends a 0..1 fraction
+    average_win:        raw.average_win    ?? 0,
+    average_loss:       raw.average_loss   ?? 0,
+    profit_factor:      raw.profit_factor  ?? 0,
+    max_drawdown_pct:   raw.max_drawdown_pct ?? 0,
+    sharpe_ratio:       raw.sharpe_ratio   ?? null,
   };
 }
 
@@ -152,9 +161,20 @@ export const api = {
       return normaliseRiskState(raw);
     },
     killSwitch: async (activate: boolean): Promise<{ success: boolean }> => {
-      // Kill switch is on the gateway control plane, not the risk service
-      const path = activate ? "/api/v1/control/kill" : "/api/v1/control/reset";
-      await req<unknown>("POST", path, activate ? { reason: "Dashboard kill switch" } : {});
+      // Kill switch is on the gateway control plane, not the risk service.
+      // Reset REQUIRES confirm:true + a reason (min 5 chars) — sending {} 400s.
+      if (activate) {
+        await req<unknown>("POST", "/api/v1/control/kill", {
+          reason: "Dashboard kill switch",
+          activated_by: "dashboard",
+        });
+      } else {
+        await req<unknown>("POST", "/api/v1/control/reset", {
+          confirm: true,
+          reason: "Resume trading from dashboard",
+          reset_by: "dashboard",
+        });
+      }
       return { success: true };
     },
   },

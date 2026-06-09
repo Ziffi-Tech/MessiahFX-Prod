@@ -295,6 +295,52 @@ async def daily_pnl(
     return result
 
 
+def summary_curve_metrics(rows: list[dict]) -> tuple[float, float | None]:
+    """
+    Derive (max_drawdown_pct, sharpe_ratio) from daily_pnl rows.
+
+    Pure function — no DB. Aggregates the per-(date,strategy,paper) realized_pnl
+    rows into one daily P&L series, then:
+      - max_drawdown_pct: worst peak-to-trough of the cumulative realized-P&L
+        curve, as a percentage of the running peak (0 while the curve only rises
+        or the peak is non-positive).
+      - sharpe_ratio: annualised Sharpe of the daily realized-P&L series
+        (mean/stdev × √252). None until there are ≥2 days with non-zero variance.
+
+    Both are honest approximations for the summary card: exact trade-count stats
+    come from kelly_stats; these add a shape-of-equity read without a capital base.
+    """
+    import math
+    from collections import defaultdict
+
+    by_date: dict[str, float] = defaultdict(float)
+    for r in rows:
+        date = str(r.get("trade_date"))
+        by_date[date] += float(r.get("realized_pnl", 0) or 0)
+
+    if not by_date:
+        return 0.0, None
+
+    daily = [by_date[d] for d in sorted(by_date)]
+
+    cum = peak = max_dd_pct = 0.0
+    for x in daily:
+        cum += x
+        peak = max(peak, cum)
+        if peak > 0:
+            max_dd_pct = max(max_dd_pct, (peak - cum) / peak * 100.0)
+
+    sharpe: float | None = None
+    if len(daily) >= 2:
+        mean = sum(daily) / len(daily)
+        var = sum((x - mean) ** 2 for x in daily) / (len(daily) - 1)
+        std = math.sqrt(var)
+        if std > 0:
+            sharpe = round(mean / std * math.sqrt(252), 4)
+
+    return round(max_dd_pct, 4), sharpe
+
+
 # ── Kelly sizing inputs ───────────────────────────────────────────────────────
 
 _KELLY_STATS = text("""
