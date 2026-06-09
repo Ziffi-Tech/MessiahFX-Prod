@@ -2,8 +2,8 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Bell, WifiOff } from "lucide-react";
-import { useHealth } from "@/lib/hooks";
+import { Bell } from "lucide-react";
+import { BotControls } from "@/components/layout/bot-controls";
 
 const ROUTE_TITLES: Record<string, string> = {
   "/":           "Live Dashboard",
@@ -39,7 +39,6 @@ function Clock() {
 
 export function Topbar() {
   const path = usePathname();
-  const { data: health, isError } = useHealth();
 
   // Match longest prefix first so /backtest matches before /
   const title =
@@ -47,8 +46,6 @@ export function Topbar() {
       .sort((a, b) => b[0].length - a[0].length)
       .find(([route]) => (route === "/" ? path === "/" : path.startsWith(route)))?.[1] ??
     "MeznaQuantFX";
-
-  const online = !isError && health?.status === "ok";
 
   return (
     <header
@@ -62,24 +59,8 @@ export function Topbar() {
 
       {/* Right cluster */}
       <div className="flex items-center gap-5">
-        {/* System status */}
-        <div className="flex items-center gap-1.5">
-          {online ? (
-            <>
-              <span className="live-dot" />
-              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                Systems online
-              </span>
-            </>
-          ) : (
-            <>
-              <WifiOff size={13} style={{ color: "var(--orange)" }} />
-              <span className="text-xs" style={{ color: "var(--orange)" }}>
-                Connecting…
-              </span>
-            </>
-          )}
-        </div>
+        {/* Bot lifecycle + real-time stream health */}
+        <BotControls />
 
         <Clock />
 

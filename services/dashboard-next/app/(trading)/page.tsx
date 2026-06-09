@@ -6,6 +6,7 @@ import { RecentSignals }   from "@/components/trading/recent-signals";
 import { RegimeBadge }     from "@/components/trading/regime-badge";
 import { RiskMeterCompact } from "@/components/trading/risk-meter-compact";
 import { PriceGrid }       from "@/components/trading/price-grid";
+import { PriceChart }      from "@/components/trading/price-chart";
 import { AiDigest }        from "@/components/trading/ai-digest";
 import { StrategyHealth }  from "@/components/trading/strategy-health";
 import { api }             from "@/lib/api";
@@ -74,11 +75,11 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Main grid — price charts + risk/AI */}
+      {/* Main grid — candlestick chart hero + risk/AI rail */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2">
-          <Suspense fallback={<PanelSkeleton h={72} />}>
-            <PriceGrid />
+          <Suspense fallback={<PanelSkeleton h={96} />}>
+            <PriceChart />
           </Suspense>
         </div>
         <div className="space-y-4">
@@ -88,6 +89,11 @@ export default function DashboardPage() {
           </Suspense>
         </div>
       </div>
+
+      {/* Market monitor — live tape across all configured symbols */}
+      <Suspense fallback={<PanelSkeleton h={48} />}>
+        <PriceGrid />
+      </Suspense>
 
       {/* Strategy health — rotation + edge + drawdown */}
       <Suspense fallback={<PanelSkeleton h={48} />}>

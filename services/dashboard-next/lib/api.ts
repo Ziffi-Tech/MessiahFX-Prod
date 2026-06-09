@@ -4,7 +4,7 @@ import type {
   Trade, PnLSummary, Opportunity,
   StrategyConfig, RiskState, RagQuery, RagResponse,
   StrategyProfile, BacktestResult, MonteCarloResult,
-  GridSearchEntry, StrategyOverview, RegimeResponse,
+  GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
 
@@ -118,6 +118,31 @@ export const api = {
       req<{ ticks: LiveTick[]; count: number; timestamp: string }>(
         "GET", `/market-data/ticks/latest${venues ? `?venues=${encodeURIComponent(venues)}` : ""}`
       ),
+    // Persisted OHLCV candles (served by the backtest service from ohlcv_bars).
+    ohlcv: (params: { venue?: string; symbol?: string; interval?: string; days?: number }) => {
+      const q = new URLSearchParams(
+        Object.fromEntries(
+          Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])
+        )
+      ).toString();
+      return req<{
+        status: string; venue: string; symbol: string; interval: string;
+        count: number; candles: OHLCVCandle[];
+      }>("GET", `/backtest/ohlcv${q ? `?${q}` : ""}`);
+    },
+  },
+
+  // ── System control (bot lifecycle) ───────────────────────────────────────────
+  control: {
+    status: () => req<Record<string, unknown>>("GET", "/api/v1/control/status"),
+    botStart: (paperMode = true) =>
+      req<Record<string, unknown>>("POST", "/api/v1/control/bot/start", {
+        paper_mode: paperMode, started_by: "dashboard",
+      }),
+    botStop: (reason = "Manual stop from dashboard") =>
+      req<Record<string, unknown>>("POST", "/api/v1/control/bot/stop", {
+        stopped_by: "dashboard", reason,
+      }),
   },
 
   // ── Journal ────────────────────────────────────────────────────────────────

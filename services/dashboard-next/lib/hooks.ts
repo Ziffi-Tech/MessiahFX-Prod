@@ -122,3 +122,26 @@ export function useToggleStrategy() {
     },
   });
 }
+
+// ── Bot lifecycle (start / stop) ──────────────────────────────────────────────
+export function useBotStart() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (paperMode: boolean) => api.control.botStart(paperMode),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: QK.riskState });
+      void qc.invalidateQueries({ queryKey: QK.strategies });
+    },
+  });
+}
+
+export function useBotStop() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (reason?: string) => api.control.botStop(reason),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: QK.riskState });
+      void qc.invalidateQueries({ queryKey: QK.strategies });
+    },
+  });
+}

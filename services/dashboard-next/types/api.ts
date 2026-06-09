@@ -259,6 +259,19 @@ export interface StrategyOverview {
   timestamp: string;
 }
 
+// ── OHLCV candles (persisted bars → lightweight-charts) ────────────────────
+
+export interface OHLCVCandle {
+  ts: number;        // epoch milliseconds (bucket start)
+  ts_dt?: string;    // ISO timestamp
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  mid?: number;
+}
+
 // ── Regime ────────────────────────────────────────────────────────────────
 
 export interface RegimeResponse {
