@@ -1,0 +1,38 @@
+# Build-context excludes for ALL service image builds (context is the repo root).
+#
+# Critical for dashboard-next: its Containerfile does `COPY --from=deps node_modules`
+# (Alpine/musl native binaries) and THEN `COPY services/dashboard-next/ .`. Without
+# this ignore, a host node_modules (glibc) would clobber the Alpine one and break
+# the build (sharp, unrs-resolver). Excluding it keeps the deps stage intact.
+
+# Node / Next.js
+**/node_modules
+**/.next
+**/.turbo
+**/*.tsbuildinfo
+
+# Python
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/venv
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# VCS / editor / OS
+.git
+.gitignore
+**/.DS_Store
+.idea
+.vscode
+
+# Local env + secrets — never bake into images
+**/.env
+**/.env.*
+!**/.env.example
+
+# Tooling / docs that images don't need
+.claude
+.playwright-mcp
+**/*.log
