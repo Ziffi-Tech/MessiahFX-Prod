@@ -24,12 +24,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from mezna_shared.logging_config import setup_logging
+from mezna_shared.observability import init_sentry
 from mezna_shared.db import get_engine, check_db_connection, dispose_engine
 from mezna_shared.redis_client import get_redis, close_redis
 
 from .config import settings
-from .routes import health
-from .feeds import binance_feed, oanda_feed
+from .routes import health, backfill, ticks
+from .feeds import binance_feed, oanda_feed, bybit_feed, okx_feed, kraken_feed
+from . import bar_writer
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -37,6 +39,7 @@ setup_logging(
     debug=settings.DEBUG,
 )
 log = structlog.get_logger()
+init_sentry(service_name=settings.SERVICE_NAME)
 
 # Module-level task list so the health route can inspect task state
 _feed_tasks: list[asyncio.Task] = []
@@ -95,11 +98,44 @@ async def lifespan(app: FastAPI):
     oanda_task.add_done_callback(_on_feed_task_done)
     _feed_tasks.append(oanda_task)
 
+    bybit_task = asyncio.create_task(
+        bybit_feed.run(settings, app.state.redis),
+        name="bybit_feed",
+    )
+    bybit_task.add_done_callback(_on_feed_task_done)
+    _feed_tasks.append(bybit_task)
+
+    okx_task = asyncio.create_task(
+        okx_feed.run(settings, app.state.redis),
+        name="okx_feed",
+    )
+    okx_task.add_done_callback(_on_feed_task_done)
+    _feed_tasks.append(okx_task)
+
+    kraken_task = asyncio.create_task(
+        kraken_feed.run(settings, app.state.redis),
+        name="kraken_feed",
+    )
+    kraken_task.add_done_callback(_on_feed_task_done)
+    _feed_tasks.append(kraken_task)
+
+    # Live bar writer — resamples the tick cache into persisted OHLCV candles.
+    # Tracked alongside the feeds so it is cancelled + awaited on shutdown.
+    bar_writer_task = asyncio.create_task(
+        bar_writer.run(settings, app.state.redis, app.state.db_engine),
+        name="bar_writer",
+    )
+    bar_writer_task.add_done_callback(_on_feed_task_done)
+    _feed_tasks.append(bar_writer_task)
+
     log.info(
         "service.ready",
         service=settings.SERVICE_NAME,
         binance_spot=settings.binance_spot_list,
         binance_perp=settings.binance_perp_list,
+        bybit_perp=settings.bybit_perp_list,
+        okx_perp=settings.okx_perp_list,
+        kraken_symbols=settings.kraken_symbol_list,
         oanda_instruments=settings.oanda_instrument_list,
         testnet=settings.BINANCE_TESTNET,
     )
@@ -135,6 +171,8 @@ app = FastAPI(
 )
 
 app.include_router(health.router, prefix="/health", tags=["health"])
+app.include_router(backfill.router, tags=["backfill"])
+app.include_router(ticks.router, tags=["ticks"])
 
 from mezna_shared.metrics import setup_metrics
 setup_metrics(app, service_name=settings.SERVICE_NAME)

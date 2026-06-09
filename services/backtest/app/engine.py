@@ -13,7 +13,8 @@ Simulation model:
 Metrics returned:
   total_trades, winning_trades, losing_trades, win_rate
   total_pnl_usd, total_fees_usd, net_pnl_usd
-  max_drawdown_pct, sharpe_ratio (annualised, daily returns)
+  max_drawdown_pct, sharpe_ratio / sortino_ratio / calmar_ratio
+    (annualised; via empyrical, falls back to a hand-rolled Sharpe)
   avg_hold_candles, trade_log (list of individual trades)
 
 Funding Arb simulation:
@@ -36,6 +37,13 @@ from typing import Any
 
 import numpy as np
 import structlog
+
+try:
+    import empyrical
+    _HAS_EMPYRICAL = True
+except Exception:  # empyrical is optional — engine degrades to a hand-rolled Sharpe
+    empyrical = None
+    _HAS_EMPYRICAL = False
 
 from .config import Settings
 
@@ -77,6 +85,8 @@ class BacktestResult:
     net_pnl_usd: float = 0.0
     max_drawdown_pct: float = 0.0
     sharpe_ratio: float = 0.0
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
     avg_hold_candles: float = 0.0
     total_return_pct: float = 0.0
     trade_log: list[dict] = field(default_factory=list)
@@ -85,6 +95,40 @@ class BacktestResult:
 
 
 # ── Metrics helpers ───────────────────────────────────────────────────────────
+
+def _safe_metric(value: Any, default: float = 0.0) -> float:
+    """Coerce an empyrical result (which may be nan/inf) to a finite float."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
+
+
+def _risk_ratios(returns: list[float]) -> dict:
+    """
+    Annualised Sharpe / Sortino / Calmar from a per-period return series.
+
+    Uses empyrical (period='daily', 252 annualisation) for standard, well-tested
+    formulas. Falls back to a hand-rolled Sharpe (Sortino/Calmar 0) if empyrical
+    is unavailable so the engine still runs in minimal environments.
+    """
+    if len(returns) < 2:
+        return {"sharpe_ratio": 0.0, "sortino_ratio": 0.0, "calmar_ratio": 0.0}
+
+    if _HAS_EMPYRICAL:
+        arr = np.asarray(returns, dtype=float)
+        return {
+            "sharpe_ratio":  round(_safe_metric(empyrical.sharpe_ratio(arr)), 4),
+            "sortino_ratio": round(_safe_metric(empyrical.sortino_ratio(arr)), 4),
+            "calmar_ratio":  round(_safe_metric(empyrical.calmar_ratio(arr)), 4),
+        }
+
+    mu = float(np.mean(returns))
+    sigma = float(np.std(returns, ddof=1))
+    sharpe = (mu / sigma * math.sqrt(252)) if sigma > 0 else 0.0
+    return {"sharpe_ratio": round(sharpe, 4), "sortino_ratio": 0.0, "calmar_ratio": 0.0}
+
 
 def _compute_metrics(
     trade_records: list[TradeRecord],
@@ -104,6 +148,8 @@ def _compute_metrics(
             "net_pnl_usd": 0.0,
             "max_drawdown_pct": 0.0,
             "sharpe_ratio": 0.0,
+            "sortino_ratio": 0.0,
+            "calmar_ratio": 0.0,
             "avg_hold_candles": 0.0,
             "total_return_pct": 0.0,
         }
@@ -130,13 +176,8 @@ def _compute_metrics(
         daily_returns.append((equity - prev_equity) / prev_equity if prev_equity > 0 else 0.0)
         prev_equity = equity
 
-    # Sharpe ratio (annualised, assuming 252 trading days, simplified)
-    if len(daily_returns) > 1:
-        mu = np.mean(daily_returns)
-        sigma = np.std(daily_returns, ddof=1)
-        sharpe = (mu / sigma * math.sqrt(252)) if sigma > 0 else 0.0
-    else:
-        sharpe = 0.0
+    # Risk-adjusted ratios (annualised) via empyrical — Sharpe / Sortino / Calmar
+    ratios = _risk_ratios(daily_returns)
 
     avg_hold = sum(t.hold_candles for t in trade_records) / len(trade_records)
     total_return_pct = (total_net / capital_usd) * 100 if capital_usd > 0 else 0.0
@@ -150,7 +191,9 @@ def _compute_metrics(
         "total_fees_usd": round(sum(t.fee_usd for t in trade_records), 4),
         "net_pnl_usd": round(total_net, 4),
         "max_drawdown_pct": round(max_dd * 100, 4),
-        "sharpe_ratio": round(sharpe, 4),
+        "sharpe_ratio": ratios["sharpe_ratio"],
+        "sortino_ratio": ratios["sortino_ratio"],
+        "calmar_ratio": ratios["calmar_ratio"],
         "avg_hold_candles": round(avg_hold, 2),
         "total_return_pct": round(total_return_pct, 4),
     }
@@ -440,3 +483,283 @@ def run_stat_arb(
         sharpe=result.sharpe_ratio,
     )
     return result
+
+
+# ── Monte Carlo simulation ────────────────────────────────────────────────────
+
+@dataclass
+class MonteCarloResult:
+    n_simulations: int
+    n_trades: int
+    capital_usd: float
+
+    # Final equity percentiles
+    equity_p10: float = 0.0
+    equity_p25: float = 0.0
+    equity_p50: float = 0.0
+    equity_p75: float = 0.0
+    equity_p90: float = 0.0
+
+    # Max drawdown percentiles (as %)
+    max_dd_p10: float = 0.0
+    max_dd_p50: float = 0.0
+    max_dd_p90: float = 0.0
+
+    # Probability of capital loss ≥ threshold
+    ruin_prob_25pct: float = 0.0   # P(equity < 75% of capital)
+    ruin_prob_50pct: float = 0.0   # P(equity < 50% of capital)
+
+    # Kelly-optimal sizing from the trade sample
+    kelly_fraction: float = 0.0
+    kelly_position_pct: float = 0.0
+
+    # Source backtest metadata
+    strategy: str = ""
+    symbol: str = ""
+
+
+def run_monte_carlo(
+    backtest_result: BacktestResult,
+    n_simulations: int = 1000,
+    kelly_multiplier: float = 0.5,
+) -> MonteCarloResult:
+    """
+    Bootstrap Monte Carlo simulation over a backtest's trade log.
+
+    Each simulation draws trade returns (with replacement) from the historical
+    trade log and replays them in random order.  The distribution of outcomes
+    across all paths gives a realistic confidence interval on future performance.
+
+    Args:
+        backtest_result: Completed BacktestResult from run_funding_arb / run_stat_arb
+        n_simulations:   Number of randomised equity paths (default 1000)
+        kelly_multiplier: Fractional Kelly multiplier for sizing estimate
+
+    Returns MonteCarloResult with percentile statistics.
+    """
+    trade_returns = [float(t.get("net_pnl_usd", 0.0)) for t in backtest_result.trade_log]
+    if not trade_returns:
+        log.warning("monte_carlo.no_trades", strategy=backtest_result.strategy)
+        return MonteCarloResult(
+            n_simulations=n_simulations,
+            n_trades=0,
+            capital_usd=backtest_result.capital_usd,
+            strategy=backtest_result.strategy,
+            symbol=backtest_result.symbol,
+        )
+
+    n_trades = len(trade_returns)
+    capital  = backtest_result.capital_usd
+    returns_arr = np.array(trade_returns, dtype=np.float64)
+
+    final_equities: list[float] = []
+    max_drawdowns: list[float] = []
+
+    rng = np.random.default_rng()  # Thread-safe, reproducibility optional
+
+    for _ in range(n_simulations):
+        path = rng.choice(returns_arr, size=n_trades, replace=True)
+        equity = capital
+        peak   = capital
+        max_dd = 0.0
+
+        for pnl in path:
+            equity += pnl
+            if equity > peak:
+                peak = equity
+            dd = (peak - equity) / peak if peak > 0 else 0.0
+            if dd > max_dd:
+                max_dd = dd
+
+        final_equities.append(equity)
+        max_drawdowns.append(max_dd * 100.0)   # Store as percentage
+
+    eq_arr = np.array(final_equities)
+    dd_arr = np.array(max_drawdowns)
+
+    # Kelly estimate from historical returns
+    wins   = [r for r in trade_returns if r > 0]
+    losses = [abs(r) for r in trade_returns if r <= 0]
+    win_rate = len(wins) / n_trades if n_trades > 0 else 0.0
+    avg_win  = float(np.mean(wins)) if wins else 0.0
+    avg_loss = float(np.mean(losses)) if losses else 1e-6
+    rr       = avg_win / avg_loss if avg_loss > 0 else 0.0
+    full_kelly = max(0.0, win_rate - (1.0 - win_rate) / rr) if rr > 0 else 0.0
+    kelly_frac = min(full_kelly * kelly_multiplier, 0.25)
+    kelly_pos_pct = kelly_frac * 100.0
+
+    result = MonteCarloResult(
+        n_simulations=n_simulations,
+        n_trades=n_trades,
+        capital_usd=capital,
+        equity_p10=round(float(np.percentile(eq_arr, 10)), 2),
+        equity_p25=round(float(np.percentile(eq_arr, 25)), 2),
+        equity_p50=round(float(np.percentile(eq_arr, 50)), 2),
+        equity_p75=round(float(np.percentile(eq_arr, 75)), 2),
+        equity_p90=round(float(np.percentile(eq_arr, 90)), 2),
+        max_dd_p10=round(float(np.percentile(dd_arr, 10)), 2),
+        max_dd_p50=round(float(np.percentile(dd_arr, 50)), 2),
+        max_dd_p90=round(float(np.percentile(dd_arr, 90)), 2),
+        ruin_prob_25pct=round(float(np.mean(eq_arr < capital * 0.75)), 4),
+        ruin_prob_50pct=round(float(np.mean(eq_arr < capital * 0.50)), 4),
+        kelly_fraction=round(kelly_frac, 6),
+        kelly_position_pct=round(kelly_pos_pct, 4),
+        strategy=backtest_result.strategy,
+        symbol=backtest_result.symbol,
+    )
+
+    log.info(
+        "monte_carlo.done",
+        strategy=backtest_result.strategy,
+        simulations=n_simulations,
+        equity_p50=result.equity_p50,
+        max_dd_p90=result.max_dd_p90,
+        ruin_prob_25=result.ruin_prob_25pct,
+        kelly_frac=result.kelly_fraction,
+    )
+    return result
+
+
+# ── Strategy parameter grid search ───────────────────────────────────────────
+
+@dataclass
+class GridSearchResult:
+    strategy: str
+    symbol: str
+    params: dict
+    sharpe_ratio: float
+    net_pnl_usd: float
+    total_trades: int
+    win_rate: float
+    max_drawdown_pct: float
+    total_return_pct: float
+    kelly_fraction: float
+
+
+def grid_search_funding_arb(
+    spot_candles: list[dict],
+    perp_candles: list[dict],
+    funding_rates: list[dict],
+    settings,
+    capital_usd: float,
+    min_edge_grid: list[float] | None = None,
+    fee_grid: list[float] | None = None,
+) -> list[dict]:
+    """
+    Grid search over funding arb parameters.
+
+    Runs one backtest per parameter combination against pre-downloaded data.
+    Returns results sorted by Sharpe ratio (descending).
+
+    Default grids:
+      min_edge_bps: [3, 5, 7, 10, 15]
+      fee_bps:      [7.5, 10, 15]
+    """
+    min_edge_grid = min_edge_grid or [3.0, 5.0, 7.0, 10.0, 15.0]
+    fee_grid      = fee_grid      or [7.5, 10.0, 15.0]
+
+    results: list[GridSearchResult] = []
+
+    for min_edge in min_edge_grid:
+        for fee in fee_grid:
+            if fee >= min_edge:
+                continue  # Fees would eat the entire edge — skip
+            r = run_funding_arb(
+                spot_candles=spot_candles,
+                perp_candles=perp_candles,
+                funding_rates=funding_rates,
+                settings=settings,
+                min_edge_bps=min_edge,
+                fee_bps=fee,
+                capital_usd=capital_usd,
+            )
+            trade_rets = [float(t.get("net_pnl_usd", 0)) for t in r.trade_log]
+            kelly = _kelly_from_returns(trade_rets)
+
+            results.append(GridSearchResult(
+                strategy="funding_arb",
+                symbol=r.symbol,
+                params={"min_edge_bps": min_edge, "fee_bps": fee},
+                sharpe_ratio=r.sharpe_ratio,
+                net_pnl_usd=r.net_pnl_usd,
+                total_trades=r.total_trades,
+                win_rate=r.win_rate,
+                max_drawdown_pct=r.max_drawdown_pct,
+                total_return_pct=r.total_return_pct,
+                kelly_fraction=kelly,
+            ))
+
+    results.sort(key=lambda x: x.sharpe_ratio, reverse=True)
+    log.info("grid_search.funding_arb_done", combinations=len(results))
+    return [vars(r) for r in results]
+
+
+def grid_search_stat_arb(
+    spot_candles: list[dict],
+    perp_candles: list[dict],
+    settings,
+    capital_usd: float,
+    window_grid: list[int] | None = None,
+    entry_z_grid: list[float] | None = None,
+    exit_z: float = 0.5,
+    fee_bps: float = 7.5,
+) -> list[dict]:
+    """
+    Grid search over stat arb parameters (z-score window + entry threshold).
+
+    Default grids:
+      window:   [50, 75, 100, 150, 200]
+      entry_z:  [1.5, 2.0, 2.5, 3.0]
+    """
+    window_grid  = window_grid  or [50, 75, 100, 150, 200]
+    entry_z_grid = entry_z_grid or [1.5, 2.0, 2.5, 3.0]
+
+    results: list[GridSearchResult] = []
+
+    for window in window_grid:
+        for entry_z in entry_z_grid:
+            if len(spot_candles) < window + 20:
+                continue  # Insufficient data for this window
+            r = run_stat_arb(
+                spot_candles=spot_candles,
+                perp_candles=perp_candles,
+                settings=settings,
+                window=window,
+                entry_z=entry_z,
+                exit_z=exit_z,
+                fee_bps=fee_bps,
+                capital_usd=capital_usd,
+            )
+            trade_rets = [float(t.get("net_pnl_usd", 0)) for t in r.trade_log]
+            kelly = _kelly_from_returns(trade_rets)
+
+            results.append(GridSearchResult(
+                strategy="stat_arb",
+                symbol=r.symbol,
+                params={"window": window, "entry_z": entry_z, "exit_z": exit_z, "fee_bps": fee_bps},
+                sharpe_ratio=r.sharpe_ratio,
+                net_pnl_usd=r.net_pnl_usd,
+                total_trades=r.total_trades,
+                win_rate=r.win_rate,
+                max_drawdown_pct=r.max_drawdown_pct,
+                total_return_pct=r.total_return_pct,
+                kelly_fraction=kelly,
+            ))
+
+    results.sort(key=lambda x: x.sharpe_ratio, reverse=True)
+    log.info("grid_search.stat_arb_done", combinations=len(results))
+    return [vars(r) for r in results]
+
+
+def _kelly_from_returns(returns: list[float], multiplier: float = 0.5) -> float:
+    """Compute half-Kelly fraction from a list of trade returns."""
+    if not returns:
+        return 0.0
+    wins   = [r for r in returns if r > 0]
+    losses = [abs(r) for r in returns if r <= 0]
+    if not wins or not losses:
+        return 0.0
+    win_rate = len(wins) / len(returns)
+    rr       = (sum(wins) / len(wins)) / (sum(losses) / len(losses))
+    full_k   = max(0.0, win_rate - (1.0 - win_rate) / rr)
+    return round(min(full_k * multiplier, 0.25), 6)

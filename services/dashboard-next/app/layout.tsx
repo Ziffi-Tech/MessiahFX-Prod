@@ -1,23 +1,21 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { Providers } from "./providers";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-});
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "MeznaQuantFX — Trading Dashboard",
-  description: "Algorithmic trading platform with AI-powered signal scoring",
+  title: "MeznaQuantFX — Trading Cockpit",
+  description: "Algorithmic trading platform — AI-powered signal scoring and strategy rotation",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${inter.variable} h-full`}>
-      <body className="h-full antialiased">{children}</body>
+      <body className="h-full antialiased">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

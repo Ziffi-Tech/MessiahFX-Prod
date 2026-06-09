@@ -390,9 +390,13 @@ services:
       start_period: 40s
 
   # ─────────────────────────────────────────────────────────────────────────
-  # DASHBOARD — Streamlit operator panel (legacy, kept for reference)
+  # DASHBOARD — Streamlit operator panel (LEGACY fallback)
+  # Retired from the default stack now that dashboard-next is the product UI.
+  # Start it only when explicitly needed:
+  #   podman-compose --profile legacy-ui up -d dashboard
   # ─────────────────────────────────────────────────────────────────────────
   dashboard:
+    profiles: ["legacy-ui"]
     build:
       context: .
       dockerfile: services/dashboard/Containerfile
@@ -416,9 +420,13 @@ services:
     networks:
       - mezna-net
 
-  # DASHBOARD-NEXT — Production Next.js trading cockpit
+  # DASHBOARD-NEXT — Production Next.js trading terminal (DEFAULT UI)
   # ─────────────────────────────────────────────────────────────────────────
   dashboard-next:
+    # The trading cockpit: live SSE price/risk/signal stream, candlestick charts,
+    # START/STOP/KILL controls, ⌘K command palette. Builds clean (standalone) with
+    # pnpm@9 + the repo-root .containerignore (keeps the Alpine node_modules from
+    # being clobbered by a host one). All gateway traffic flows through GATEWAY_URL.
     build:
       context: .
       dockerfile: services/dashboard-next/Containerfile
@@ -427,6 +435,9 @@ services:
     restart: unless-stopped
     environment:
       GATEWAY_URL: http://gateway:8000
+      # Auth: signed session cookies + user roster (see docs/terminal.md).
+      SESSION_SECRET: ${SESSION_SECRET:-mezna_dev_session_secret_change_me}
+      DASHBOARD_USERS: ${DASHBOARD_USERS:-}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-mezna}
       NODE_ENV: production
     ports:

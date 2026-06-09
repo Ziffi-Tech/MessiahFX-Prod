@@ -31,6 +31,7 @@ from redis.exceptions import ResponseError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from mezna_shared.redis_client import RedisKeys, StreamNames
+from mezna_shared.opportunities import upsert_opportunity
 
 
 async def _notify(redis: Redis, event: str, **kwargs) -> None:
@@ -94,6 +95,7 @@ async def _process(
 
     strategy_type = opportunity.get("strategy_type", fields.get(StreamNames.STRATEGY_TYPE, ""))
     symbol = opportunity.get("symbol_primary", fields.get(StreamNames.SYMBOL_PRIMARY, ""))
+    opportunity_id = fields.get(StreamNames.OPPORTUNITY_ID)
 
     # ── Daily reset check ──────────────────────────────────────────────────────
     await state.check_and_reset_daily(redis)
@@ -229,6 +231,10 @@ async def _process(
                 strategy_type=strategy_type,
                 reason=result.rejection_reason,
             )
+
+    # Best-effort persist the opportunity (detected + AI + risk) so the journal
+    # funnel/history is populated. Both branches above set `enriched`.
+    await upsert_opportunity(db_engine, opportunity_id, enriched)
 
 
 async def run(settings: Settings, redis: Redis, db_engine: AsyncEngine) -> None:

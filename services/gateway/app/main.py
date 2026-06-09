@@ -18,13 +18,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from mezna_shared.logging_config import setup_logging
+from mezna_shared.observability import init_sentry
 from mezna_shared.db import get_engine, check_db_connection, dispose_engine
 from mezna_shared.redis_client import get_redis, close_redis
 from mezna_shared.credential_store import CredentialStore
 from mezna_shared.metrics import setup_metrics
 
 from .config import settings
-from .routes import health, signals, control, credentials
+from .routes import health, signals, control, credentials, proxy, stream
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -32,6 +33,7 @@ setup_logging(
     debug=settings.DEBUG,
 )
 log = structlog.get_logger()
+init_sentry(service_name=settings.SERVICE_NAME)
 
 
 @asynccontextmanager
@@ -109,14 +111,21 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    # Must cover every method the proxied APIs serve. Strategy config updates
+    # use PATCH (/strategy/configs/{name}); credential management uses DELETE.
+    # Omitting them caused browser preflight (OPTIONS) to reject those calls.
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
-app.include_router(health.router, prefix="/health", tags=["health"])
-app.include_router(signals.router, prefix="/api/v1/signals", tags=["signals"])
-app.include_router(control.router, prefix="/api/v1/control", tags=["control"])
-app.include_router(credentials.router, prefix="/api/v1/credentials", tags=["credentials"])
+app.include_router(health.router,       prefix="/health",            tags=["health"])
+app.include_router(signals.router,      prefix="/api/v1/signals",    tags=["signals"])
+app.include_router(control.router,      prefix="/api/v1/control",    tags=["control"])
+app.include_router(credentials.router,  prefix="/api/v1/credentials",tags=["credentials"])
+# Real-time SSE spine — registered before the catch-all proxy.
+app.include_router(stream.router,       tags=["stream"])
+# Service reverse proxy — must be last (catch-all path)
+app.include_router(proxy.router,        tags=["proxy"])
 
 setup_metrics(app, service_name=settings.SERVICE_NAME)

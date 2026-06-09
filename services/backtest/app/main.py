@@ -24,12 +24,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from mezna_shared.logging_config import setup_logging
+from mezna_shared.observability import init_sentry
 from mezna_shared.metrics import setup_metrics
 
 from .config import settings
 from .routes import health, backtest
 from .routes import compare
 from .routes import regime_backtest
+from .routes import ohlcv
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -37,6 +39,7 @@ setup_logging(
     debug=settings.DEBUG,
 )
 log = structlog.get_logger()
+init_sentry(service_name=settings.SERVICE_NAME)
 
 
 @asynccontextmanager
@@ -89,8 +92,11 @@ app = FastAPI(
 )
 
 app.include_router(health.router, prefix="/health", tags=["health"])
-app.include_router(backtest.router, prefix="/backtest", tags=["backtest"])
-app.include_router(compare.router, prefix="/backtest", tags=["compare"])
-app.include_router(regime_backtest.router, prefix="/backtest", tags=["regime-backtest"])
+# Backtest routes at root: /funding-arb, /stat-arb, /symbols, etc.
+# Gateway proxy strips the "backtest" prefix before forwarding.
+app.include_router(backtest.router,         tags=["backtest"])
+app.include_router(compare.router,          tags=["compare"])
+app.include_router(regime_backtest.router,  tags=["regime-backtest"])
+app.include_router(ohlcv.router,            tags=["ohlcv"])
 
 setup_metrics(app, service_name=settings.SERVICE_NAME)

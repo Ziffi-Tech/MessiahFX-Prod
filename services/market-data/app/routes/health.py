@@ -20,7 +20,7 @@ log = structlog.get_logger()
 router = APIRouter()
 
 # Feed venues we expect to be running (subset may be skipped if not configured)
-_EXPECTED_VENUES = ["binance", "oanda"]
+_EXPECTED_VENUES = ["binance", "bybit", "okx", "kraken", "oanda"]
 
 
 @router.get("/live")
@@ -81,6 +81,12 @@ async def feed_status(request: Request) -> JSONResponse:
         # Determine if this feed is expected to be running
         if venue == "binance":
             configured = bool(settings.binance_spot_list or settings.binance_perp_list)
+        elif venue == "bybit":
+            configured = bool(settings.bybit_perp_list)
+        elif venue == "okx":
+            configured = bool(settings.okx_perp_list)
+        elif venue == "kraken":
+            configured = bool(settings.kraken_symbol_list)
         elif venue == "oanda":
             configured = bool(settings.OANDA_API_KEY and settings.OANDA_ACCOUNT_ID and settings.oanda_instrument_list)
         else:

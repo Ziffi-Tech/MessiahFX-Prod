@@ -267,8 +267,8 @@ _DAILY_PNL = text("""
     WHERE
         status = 'filled'
         AND filled_at IS NOT NULL
-        AND filled_at >= NOW() - (:days || ' days')::interval
-        AND (:strategy_type IS NULL OR strategy_type = :strategy_type)
+        AND filled_at >= NOW() - make_interval(days => :days)
+        AND (CAST(:strategy_type AS text) IS NULL OR strategy_type = CAST(:strategy_type AS text))
     GROUP BY 1, 2, 3
     ORDER BY 1 DESC, 2
 """)
@@ -295,6 +295,52 @@ async def daily_pnl(
     return result
 
 
+def summary_curve_metrics(rows: list[dict]) -> tuple[float, float | None]:
+    """
+    Derive (max_drawdown_pct, sharpe_ratio) from daily_pnl rows.
+
+    Pure function — no DB. Aggregates the per-(date,strategy,paper) realized_pnl
+    rows into one daily P&L series, then:
+      - max_drawdown_pct: worst peak-to-trough of the cumulative realized-P&L
+        curve, as a percentage of the running peak (0 while the curve only rises
+        or the peak is non-positive).
+      - sharpe_ratio: annualised Sharpe of the daily realized-P&L series
+        (mean/stdev × √252). None until there are ≥2 days with non-zero variance.
+
+    Both are honest approximations for the summary card: exact trade-count stats
+    come from kelly_stats; these add a shape-of-equity read without a capital base.
+    """
+    import math
+    from collections import defaultdict
+
+    by_date: dict[str, float] = defaultdict(float)
+    for r in rows:
+        date = str(r.get("trade_date"))
+        by_date[date] += float(r.get("realized_pnl", 0) or 0)
+
+    if not by_date:
+        return 0.0, None
+
+    daily = [by_date[d] for d in sorted(by_date)]
+
+    cum = peak = max_dd_pct = 0.0
+    for x in daily:
+        cum += x
+        peak = max(peak, cum)
+        if peak > 0:
+            max_dd_pct = max(max_dd_pct, (peak - cum) / peak * 100.0)
+
+    sharpe: float | None = None
+    if len(daily) >= 2:
+        mean = sum(daily) / len(daily)
+        var = sum((x - mean) ** 2 for x in daily) / (len(daily) - 1)
+        std = math.sqrt(var)
+        if std > 0:
+            sharpe = round(mean / std * math.sqrt(252), 4)
+
+    return round(max_dd_pct, 4), sharpe
+
+
 # ── Kelly sizing inputs ───────────────────────────────────────────────────────
 
 _KELLY_STATS = text("""
@@ -314,8 +360,8 @@ _KELLY_STATS = text("""
     WHERE
         status = 'filled'
         AND filled_at IS NOT NULL
-        AND filled_at >= NOW() - (:days || ' days')::interval
-        AND (:strategy_type IS NULL OR strategy_type = :strategy_type)
+        AND filled_at >= NOW() - make_interval(days => :days)
+        AND (CAST(:strategy_type AS text) IS NULL OR strategy_type = CAST(:strategy_type AS text))
 """)
 
 
@@ -338,12 +384,14 @@ async def kelly_stats(
         total_fees_usd       — sum of all fees (USD)
         win_rate             — winning_trades / (winning + losing)
         edge_ratio           — avg_win_usd / avg_loss_usd (0 when no losing trades)
-        realized_pnl_populated — False until Phase 7 position-close tracking is live.
-                                  When False, avg_win/loss will be 0 — do not use for Kelly.
+        realized_pnl_populated — True once any position has been closed (realized P&L
+                                  is now tracked per fill via average-cost accounting,
+                                  migration 003). False only before the first close,
+                                  when avg_win/loss are still 0 — do not use for Kelly.
 
-    NOTE: realized_pnl is always 0 until the position-close logic in Phase 7 is
-    implemented.  Callers MUST check realized_pnl_populated before using avg_win_usd
-    and avg_loss_usd for Kelly computation.
+    Realized P&L is net of fees and populated by the executor as positions are
+    reduced/closed. Callers SHOULD still check realized_pnl_populated before using
+    avg_win_usd / avg_loss_usd, since both are 0 until the first round trip closes.
     """
     params = {"days": days, "strategy_type": strategy_type}
     async with get_async_session(db_engine) as session:
@@ -500,6 +548,50 @@ async def list_risk_events(
     return [_row_to_dict(r) for r in rows], (count_row.scalar() or 0)
 
 
+# ── Positions ─────────────────────────────────────────────────────────────────
+
+_SELECT_POSITIONS = text("""
+    SELECT
+        venue, symbol, strategy_type, paper_mode,
+        net_qty, avg_price, open_fees, realized_pnl, fee_currency,
+        status, opened_at, closed_at, updated_at
+    FROM positions
+    WHERE
+        (:status        IS NULL OR status = :status)
+        AND (:strategy_type IS NULL OR strategy_type = :strategy_type)
+        AND (:paper_mode    IS NULL OR paper_mode = :paper_mode::boolean)
+    ORDER BY (status = 'open') DESC, updated_at DESC
+    LIMIT :limit OFFSET :offset
+""")
+
+
+async def list_positions(
+    db_engine: AsyncEngine,
+    *,
+    status: str | None = None,
+    strategy_type: str | None = None,
+    paper_mode: bool | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict]:
+    """
+    Return positions (net exposure + cumulative realized P&L) per trading key.
+
+    Defaults to all; pass status='open' for live exposure only. Summing
+    realized_pnl across all positions equals the trades-table realized P&L total.
+    """
+    params = {
+        "status": status,
+        "strategy_type": strategy_type,
+        "paper_mode": str(paper_mode).lower() if paper_mode is not None else None,
+        "limit": min(limit, 500),
+        "offset": offset,
+    }
+    async with get_async_session(db_engine) as session:
+        rows = await session.execute(_SELECT_POSITIONS, params)
+    return [_row_to_dict(r) for r in rows]
+
+
 # ── Reconciliation helpers ────────────────────────────────────────────────────
 
 _STALE_TRADES = text("""
@@ -507,7 +599,7 @@ _STALE_TRADES = text("""
     FROM trades
     WHERE
         status IN ('pending', 'open')
-        AND opened_at < NOW() - (:stale_minutes || ' minutes')::interval
+        AND opened_at < NOW() - make_interval(mins => :stale_minutes)
     ORDER BY opened_at ASC
 """)
 
@@ -522,12 +614,14 @@ _MARK_TRADE_ERROR = text("""
         AND status IN ('pending', 'open')
 """)
 
+# Real concurrent exposure: distinct net positions currently open. Uses the
+# positions ledger (migration 003) rather than trades — market orders fill/reject
+# immediately so trades are ~never left 'pending'/'open', which made the old count
+# ~0 and the risk position limit never bind.
 _OPEN_POSITION_COUNT = text("""
-    SELECT COUNT(DISTINCT opportunity_id)
-    FROM trades
-    WHERE
-        opportunity_id IS NOT NULL
-        AND status IN ('pending', 'open', 'partially_filled')
+    SELECT COUNT(*)
+    FROM positions
+    WHERE status = 'open'
 """)
 
 
@@ -548,6 +642,13 @@ async def mark_trade_error(
 
 
 async def count_open_positions(db_engine: AsyncEngine) -> int:
+    """
+    Number of net positions currently open (positions.status='open').
+
+    The journal reconciler writes this to risk_state.open_position_count, which the
+    risk engine enforces against RISK_MAX_OPEN_POSITIONS. Now that it reflects real
+    exposure, the limit actually binds — tune RISK_MAX_OPEN_POSITIONS accordingly.
+    """
     async with get_async_session(db_engine) as session:
         row = (await session.execute(_OPEN_POSITION_COUNT)).fetchone()
     return int(row[0]) if row else 0

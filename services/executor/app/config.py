@@ -23,6 +23,25 @@ class Settings(BaseSettings):
     BINANCE_API_SECRET: str = ""
     BINANCE_TESTNET: bool = True
 
+    # Bybit (linear USDT perpetuals via CCXT)
+    BYBIT_API_KEY: str = ""
+    BYBIT_API_SECRET: str = ""
+    BYBIT_TESTNET: bool = True
+    BYBIT_TAKER_FEE_BPS: float = 5.5    # 0.055% taker (linear perp)
+
+    # OKX (linear USDT perpetuals via CCXT). OKX also requires an API passphrase.
+    OKX_API_KEY: str = ""
+    OKX_API_SECRET: str = ""
+    OKX_API_PASSWORD: str = ""
+    OKX_TESTNET: bool = True
+    OKX_TAKER_FEE_BPS: float = 5.0     # 0.05% taker (linear perp)
+
+    # Kraken (spot via CCXT). No public sandbox — keep TRADING_MODE=paper.
+    KRAKEN_API_KEY: str = ""
+    KRAKEN_API_SECRET: str = ""
+    KRAKEN_TESTNET: bool = False
+    KRAKEN_TAKER_FEE_BPS: float = 26.0  # ~0.26% taker (spot, low-volume tier)
+
     # Oanda (v20 REST API)
     OANDA_API_KEY: str = ""
     OANDA_ACCOUNT_ID: str = ""
@@ -46,6 +65,23 @@ class Settings(BaseSettings):
     # Internal service URLs
     JOURNAL_URL: str = "http://journal:8006"
     RISK_URL: str = "http://risk:8003"
+
+    # Rotation + edge monitoring thresholds (must match strategy service config)
+    ROTATION_CONSECUTIVE_LOSS_THRESHOLD: int = 4
+    EDGE_MONITOR_WINDOW: int = 20
+    EDGE_BASELINE_WIN_RATE: float = 0.55
+    EDGE_DECAY_THRESHOLD: float = 0.15
+
+    # ── Kelly position sizing (opt-in) ─────────────────────────────────────────
+    # OFF by default: sizing stays at the fixed position_usd below. Enable only
+    # after enough live/paper edge stats have accumulated AND equity is set.
+    KELLY_ENABLED: bool = False
+    # Account equity used as the Kelly capital base. 0 = unknown → fixed sizing.
+    ACCOUNT_EQUITY_USD: float = 0.0
+    # Fractional Kelly multiplier (0.5 = half-Kelly; safer geometric growth).
+    KELLY_MULTIPLIER: float = 0.5
+    # Hard per-position cap as a fraction of equity (independent of Kelly output).
+    KELLY_MAX_POSITION_PCT: float = 0.05
 
     @property
     def mt5_configured(self) -> bool:

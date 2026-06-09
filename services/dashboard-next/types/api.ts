@@ -1,10 +1,20 @@
 // ─── API Types — matches FastAPI service response models ──────────────────
 
+export type StrategyType =
+  | "funding_arb"
+  | "stat_arb"
+  | "swing"
+  | "breakout"
+  | "mean_reversion_scalp"
+  | "momentum";
+
+export type TradingMode = "paper" | "live" | "halted";
+
 export interface HealthResponse {
   status: "ok" | "degraded" | "down";
   service: string;
   version: string;
-  trading_mode: "paper" | "live" | "halted";
+  trading_mode: TradingMode;
   timestamp: string;
   dependencies: Record<string, string> | null;
 }
@@ -26,7 +36,7 @@ export interface Trade {
   fee_currency: string | null;
   slippage_bps: number | null;
   status: "pending" | "open" | "filled" | "cancelled" | "rejected";
-  strategy_type: string | null;
+  strategy_type: StrategyType | null;
   paper_mode: boolean;
   rejection_reason: string | null;
   realized_pnl: number | null;
@@ -52,7 +62,7 @@ export interface PnLSummary {
 
 export interface Opportunity {
   id: string;
-  strategy_type: string;
+  strategy_type: StrategyType;
   venue: string;
   symbol_primary: string;
   symbol_secondary: string | null;
@@ -72,10 +82,10 @@ export interface Opportunity {
 
 export interface StrategyConfig {
   id: string;
-  strategy_type: "funding_arb" | "stat_arb" | "swing";
+  strategy_type: StrategyType;
   enabled: boolean;
   paper_mode: boolean;
-  latency_profile: "standard" | "relaxed" | "aggressive";
+  latency_profile: "standard" | "relaxed" | "fast";
   params: Record<string, unknown>;
   risk_overrides: Record<string, unknown>;
   updated_at: string;
@@ -83,7 +93,7 @@ export interface StrategyConfig {
 }
 
 export interface RiskState {
-  trading_mode: "paper" | "live" | "halted";
+  trading_mode: TradingMode;
   kill_switch_active: boolean;
   daily_drawdown_pct: number;
   max_daily_drawdown_pct: number;
@@ -147,16 +157,129 @@ export interface StrategyProfile {
   created_at: string;
 }
 
+// ── Backtest types — matches actual backtest engine output ─────────────────
+
+export interface EquityCurvePoint {
+  ts: string;         // ISO timestamp
+  equity_usd: number;
+  trade_pnl: number;
+}
+
 export interface BacktestResult {
-  strategy_type: string;
-  start_date: string;
-  end_date: string;
+  strategy: string;
+  symbol: string;
+  interval: string;
+  start_dt: string;
+  end_dt: string;
+  capital_usd: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
+  total_pnl_usd: number;
+  total_fees_usd: number;
+  net_pnl_usd: number;
+  max_drawdown_pct: number;
+  sharpe_ratio: number;
+  avg_hold_candles: number;
+  total_return_pct: number;
+  equity_curve: EquityCurvePoint[];
+  trade_log: Record<string, unknown>[];
+  params: Record<string, unknown>;
+}
+
+export interface MonteCarloResult {
+  n_simulations: number;
+  n_trades: number;
+  capital_usd: number;
+  equity_p10: number;
+  equity_p25: number;
+  equity_p50: number;
+  equity_p75: number;
+  equity_p90: number;
+  max_dd_p10: number;
+  max_dd_p50: number;
+  max_dd_p90: number;
+  ruin_prob_25pct: number;
+  ruin_prob_50pct: number;
+  kelly_fraction: number;
+  kelly_position_pct: number;
+  strategy: string;
+  symbol: string;
+}
+
+export interface GridSearchEntry {
+  strategy: string;
+  symbol: string;
+  params: Record<string, number>;
+  sharpe_ratio: number;
+  net_pnl_usd: number;
   total_trades: number;
   win_rate: number;
-  profit_factor: number;
-  sharpe_ratio: number | null;
   max_drawdown_pct: number;
   total_return_pct: number;
-  annualised_return_pct: number | null;
-  equity_curve: { date: string; equity: number }[];
+  kelly_fraction: number;
+}
+
+// ── Strategy operational status ────────────────────────────────────────────
+
+export interface StrategyRotationEntry {
+  consecutive_losses: number;
+  degraded: boolean;
+  threshold: number;
+}
+
+export interface StrategyEdgeEntry {
+  win_rate: number | null;
+  window_size: number;
+  decayed: boolean;
+  recent: number[];   // sparkline bits
+}
+
+export interface StrategyDrawdownEntry {
+  cum_pnl_usd: number | null;
+  drawdown_pct: number | null;
+  avg_win_usd: number | null;
+  avg_loss_usd: number | null;
+}
+
+export interface StrategyOverviewEntry {
+  rotation: StrategyRotationEntry;
+  edge: StrategyEdgeEntry;
+  drawdown: StrategyDrawdownEntry;
+}
+
+export interface StrategyOverview {
+  current_regime: string;
+  local_regime: string | null;
+  preferred_strategy: string | null;
+  baseline_win_rate: number;
+  rotation_threshold: number;
+  strategies: Record<StrategyType, StrategyOverviewEntry>;
+  timestamp: string;
+}
+
+// ── OHLCV candles (persisted bars → lightweight-charts) ────────────────────
+
+export interface OHLCVCandle {
+  ts: number;        // epoch milliseconds (bucket start)
+  ts_dt?: string;    // ISO timestamp
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  mid?: number;
+}
+
+// ── Regime ────────────────────────────────────────────────────────────────
+
+export interface RegimeResponse {
+  regime: string;
+  confidence: number;
+  regime_summary?: string;
+  strategy_fitness?: Record<string, number>;
+  risk_adjustment?: string;
+  key_indicators?: string[];
+  timestamp: string;
 }

@@ -1,29 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Zap } from "lucide-react";
+import { useSignals } from "@/lib/hooks";
 import type { Opportunity } from "@/types/api";
 
-export function RecentSignals() {
-  const [signals, setSignals] = useState<Opportunity[]>([]);
-  const [loading, setLoading] = useState(true);
+function statusBadge(s: Opportunity) {
+  if (s.executed)              return <span className="badge badge-green">FILLED</span>;
+  if (s.expired)               return <span className="badge badge-gray">EXPIRED</span>;
+  if (s.risk_approved === false) return <span className="badge badge-red">REJECTED</span>;
+  return                              <span className="badge badge-blue">PENDING</span>;
+}
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch("/api/gateway/journal/opportunities?limit=10", { cache: "no-store" });
-        if (res.ok) {
-          const json = await res.json();
-          setSignals(json.opportunities ?? []);
-        }
-      } catch { /* */ } finally {
-        setLoading(false);
-      }
-    };
-    load();
-    const id = setInterval(load, 15000);
-    return () => clearInterval(id);
-  }, []);
+export function RecentSignals() {
+  const { data, isLoading } = useSignals(15);
+  const signals = data?.opportunities ?? [];
 
   return (
     <div className="panel">
@@ -37,15 +27,22 @@ export function RecentSignals() {
             Recent Signals
           </span>
         </div>
-        <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-          Auto-refreshes every 15s
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="live-dot" />
+          <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
+            LIVE
+          </span>
+        </div>
       </div>
 
-      {loading ? (
+      {isLoading ? (
         <div className="p-4 space-y-2">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-8 rounded animate-pulse" style={{ background: "var(--bg-surface-2)" }} />
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-8 rounded animate-pulse"
+              style={{ background: "var(--bg-surface-2)" }}
+            />
           ))}
         </div>
       ) : signals.length === 0 ? (
@@ -55,66 +52,76 @@ export function RecentSignals() {
           </p>
         </div>
       ) : (
-        <table className="w-full text-xs">
-          <thead>
-            <tr style={{ borderBottom: `1px solid var(--border)` }}>
-              {["Time", "Strategy", "Symbol", "Edge bps", "AI Score", "Status"].map(h => (
-                <th key={h} className="px-4 py-2 text-left font-medium" style={{ color: "var(--text-tertiary)" }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {signals.map((s) => (
-              <tr
-                key={s.id}
-                className="transition-colors hover:bg-[var(--bg-hover)]"
-                style={{ borderBottom: `1px solid var(--border-subtle)` }}
-              >
-                <td className="px-4 py-2 mono" style={{ color: "var(--text-tertiary)" }}>
-                  {new Date(s.detected_at).toLocaleTimeString("en-GB", { hour12: false })}
-                </td>
-                <td className="px-4 py-2 font-medium" style={{ color: "var(--text-primary)" }}>
-                  {s.strategy_type.replace("_", " ").toUpperCase()}
-                </td>
-                <td className="px-4 py-2 mono" style={{ color: "var(--blue)" }}>
-                  {s.symbol_primary}
-                </td>
-                <td className="px-4 py-2 mono" style={{ color: (s.net_edge_bps ?? 0) >= 0 ? "var(--green)" : "var(--red)" }}>
-                  {s.net_edge_bps?.toFixed(1) ?? "—"}
-                </td>
-                <td className="px-4 py-2">
-                  {s.ai_score !== null ? (
-                    <span
-                      className="mono font-bold"
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                {["Time", "Strategy", "Symbol", "Edge bps", "R:R", "AI Score", "Status"].map((h) => (
+                  <th
+                    key={h}
+                    className="px-4 py-2 text-left font-medium"
+                    style={{ color: "var(--text-tertiary)" }}
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {signals.map((s) => {
+                const rs = s as Opportunity & { rr_ratio?: number };
+                return (
+                  <tr
+                    key={s.id}
+                    className="transition-colors hover:bg-[var(--bg-hover)]"
+                    style={{ borderBottom: "1px solid var(--border-subtle)" }}
+                  >
+                    <td className="px-4 py-2 mono" style={{ color: "var(--text-tertiary)" }}>
+                      {new Date(s.detected_at).toLocaleTimeString("en-GB", { hour12: false })}
+                    </td>
+                    <td className="px-4 py-2 font-medium" style={{ color: "var(--text-primary)" }}>
+                      {s.strategy_type.replace(/_/g, " ").toUpperCase()}
+                    </td>
+                    <td className="px-4 py-2 mono" style={{ color: "var(--blue)" }}>
+                      {s.symbol_primary}
+                    </td>
+                    <td
+                      className="px-4 py-2 mono"
                       style={{
-                        color: s.ai_score >= 70 ? "var(--green)"
-                          : s.ai_score >= 40 ? "var(--orange)"
-                          : "var(--red)"
+                        color: (s.net_edge_bps ?? 0) >= 0 ? "var(--green)" : "var(--red)",
                       }}
                     >
-                      {s.ai_score}
-                    </span>
-                  ) : (
-                    <span style={{ color: "var(--text-tertiary)" }}>—</span>
-                  )}
-                </td>
-                <td className="px-4 py-2">
-                  {s.executed ? (
-                    <span className="badge badge-green">EXECUTED</span>
-                  ) : s.expired ? (
-                    <span className="badge badge-gray">EXPIRED</span>
-                  ) : s.risk_approved === false ? (
-                    <span className="badge badge-red">REJECTED</span>
-                  ) : (
-                    <span className="badge badge-blue">PENDING</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                      {s.net_edge_bps?.toFixed(1) ?? "—"}
+                    </td>
+                    <td className="px-4 py-2 mono" style={{ color: "var(--text-secondary)" }}>
+                      {rs.rr_ratio != null ? `${rs.rr_ratio.toFixed(1)}:1` : "—"}
+                    </td>
+                    <td className="px-4 py-2">
+                      {s.ai_score !== null ? (
+                        <span
+                          className="mono font-bold"
+                          style={{
+                            color:
+                              s.ai_score >= 70
+                                ? "var(--green)"
+                                : s.ai_score >= 40
+                                ? "var(--orange)"
+                                : "var(--red)",
+                          }}
+                        >
+                          {s.ai_score}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-tertiary)" }}>—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2">{statusBadge(s)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

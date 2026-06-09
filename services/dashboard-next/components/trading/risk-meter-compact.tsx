@@ -1,29 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Shield, AlertTriangle } from "lucide-react";
-import type { RiskState } from "@/types/api";
+import { useRiskState } from "@/lib/hooks";
 
 export function RiskMeterCompact() {
-  const [risk, setRisk] = useState<RiskState | null>(null);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch("/api/gateway/risk/state", { cache: "no-store" });
-        if (res.ok) setRisk(await res.json());
-      } catch { /* */ }
-    };
-    load();
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
-  }, []);
+  const { data: risk } = useRiskState();
 
   const drawdownPct = risk?.daily_drawdown_pct ?? 0;
-  const maxPct = risk?.max_daily_drawdown_pct ?? 3;
-  const fillPct = Math.min((drawdownPct / maxPct) * 100, 100);
-  const isDanger = fillPct > 70;
-  const barColour = fillPct < 50 ? "var(--green)" : fillPct < 75 ? "var(--orange)" : "var(--red)";
+  const maxPct      = risk?.max_daily_drawdown_pct ?? 3;
+  const fillPct     = Math.min((drawdownPct / maxPct) * 100, 100);
+  const isDanger    = fillPct > 70;
+  const barColour   =
+    fillPct < 50 ? "var(--green)" : fillPct < 75 ? "var(--orange)" : "var(--red)";
 
   return (
     <div className="panel p-4 space-y-3">
@@ -34,12 +22,14 @@ export function RiskMeterCompact() {
             Risk Monitor
           </span>
         </div>
-        {risk?.kill_switch_active && (
-          <span className="badge badge-red">KILLED</span>
-        )}
-        {risk?.in_cooldown && !risk.kill_switch_active && (
-          <span className="badge badge-orange">COOLDOWN</span>
-        )}
+        <div className="flex items-center gap-2">
+          {risk?.kill_switch_active && (
+            <span className="badge badge-red">KILLED</span>
+          )}
+          {risk?.in_cooldown && !risk.kill_switch_active && (
+            <span className="badge badge-orange">COOLDOWN</span>
+          )}
+        </div>
       </div>
 
       {/* Drawdown bar */}
@@ -64,7 +54,15 @@ export function RiskMeterCompact() {
       {/* Consecutive losses */}
       <div className="flex justify-between text-xs">
         <span style={{ color: "var(--text-secondary)" }}>Consec. Losses</span>
-        <span className="mono" style={{ color: (risk?.consecutive_losses ?? 0) >= 3 ? "var(--orange)" : "var(--text-primary)" }}>
+        <span
+          className="mono"
+          style={{
+            color:
+              (risk?.consecutive_losses ?? 0) >= 3
+                ? "var(--orange)"
+                : "var(--text-primary)",
+          }}
+        >
           {risk?.consecutive_losses ?? 0} / {risk?.max_consecutive_losses ?? 5}
         </span>
       </div>

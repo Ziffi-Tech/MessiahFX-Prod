@@ -1,67 +1,64 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 interface StatCardProps {
-  label: string;
-  valuePath: string;
-  valueKey: string;
-  prefix?: string;
-  suffix?: string;
-  decimals?: number;
-  signed?: boolean;
-  invert?: boolean; // invert the colour (lower = green, higher = red)
-  icon?: ReactNode;
+  label:      string;
+  queryKey:   readonly unknown[];
+  queryFn:    () => Promise<Record<string, unknown>>;
+  valueKey:   string;
+  prefix?:    string;
+  suffix?:    string;
+  decimals?:  number;
+  signed?:    boolean;
+  /** Invert colour logic: lower value = green (e.g. drawdown) */
+  invert?:    boolean;
+  icon?:      ReactNode;
+  refetchInterval?: number;
 }
 
 export function StatCard({
-  label,
-  valuePath,
-  valueKey,
-  prefix = "",
-  suffix = "",
-  decimals = 0,
-  signed = false,
-  invert = false,
-  icon,
+  label, queryKey, queryFn, valueKey,
+  prefix = "", suffix = "", decimals = 0,
+  signed = false, invert = false, icon,
+  refetchInterval = 10_000,
 }: StatCardProps) {
-  const [value, setValue] = useState<number | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data, isLoading } = useQuery({
+    queryKey,
+    queryFn,
+    refetchInterval,
+  });
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch(valuePath, { cache: "no-store" });
-        const json = await res.json();
-        setValue(json[valueKey] ?? null);
-      } catch {
-        setValue(null);
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-    const id = setInterval(load, 10000);
-    return () => clearInterval(id);
-  }, [valuePath, valueKey]);
+  const raw = data?.[valueKey];
+  const value = raw !== undefined && raw !== null ? Number(raw) : null;
 
   const isPositive = value !== null && (invert ? value <= 0 : value >= 0);
-  const color = value === null || value === 0
-    ? "var(--text-secondary)"
-    : isPositive ? "var(--green)" : "var(--red)";
+  const color =
+    value === null || value === 0
+      ? "var(--text-secondary)"
+      : isPositive
+      ? "var(--green)"
+      : "var(--red)";
 
-  const display = value === null
-    ? "—"
-    : `${signed && value > 0 ? "+" : ""}${prefix}${value.toFixed(decimals)}${suffix}`;
+  const display =
+    value === null
+      ? "—"
+      : `${signed && value > 0 ? "+" : ""}${prefix}${value.toFixed(decimals)}${suffix}`;
 
   return (
     <div className="panel p-4 space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs" style={{ color: "var(--text-secondary)" }}>{label}</span>
+        <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+          {label}
+        </span>
         <span style={{ color: "var(--text-tertiary)" }}>{icon}</span>
       </div>
-      {loading ? (
-        <div className="h-6 w-24 rounded animate-pulse" style={{ background: "var(--bg-surface-2)" }} />
+      {isLoading ? (
+        <div
+          className="h-6 w-24 rounded animate-pulse"
+          style={{ background: "var(--bg-surface-2)" }}
+        />
       ) : (
         <div className="mono text-xl font-bold" style={{ color }}>
           {display}

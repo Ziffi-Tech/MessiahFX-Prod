@@ -17,7 +17,10 @@ from ..config import settings
 
 router = APIRouter()
 
-_ALL_STRATEGIES = ("funding_arb", "stat_arb", "swing")
+_ALL_STRATEGIES = (
+    "funding_arb", "stat_arb", "swing",
+    "breakout", "mean_reversion_scalp", "momentum",
+)
 
 
 @router.get("/live")

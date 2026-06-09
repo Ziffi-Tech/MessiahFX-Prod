@@ -33,6 +33,7 @@ from redis.asyncio import Redis
 
 from .config import settings as _settings
 from mezna_shared.metrics import setup_metrics
+from mezna_shared.observability import init_sentry
 from .store import ensure_collection
 from .routes.health import router as health_router
 from .routes.ingest import router as ingest_router
@@ -41,6 +42,7 @@ from .routes.query import router as query_router
 from .routes.strategy_profiles import router as strategy_profiles_router
 
 log = structlog.get_logger()
+init_sentry(service_name=getattr(_settings, "SERVICE_NAME", "rag"))
 
 
 @asynccontextmanager

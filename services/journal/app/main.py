@@ -20,6 +20,7 @@ Routes:
   GET /opportunities/{id}        — single opportunity + linked trades
   GET /pnl/daily                 — daily activity rows (N days)
   GET /pnl/summary               — rolled-up totals
+  GET /pnl/positions             — net positions + realized P&L per key
   GET /audit                     — audit log entries
   GET /audit/risk-events         — risk events (halts, cooldowns)
 """
@@ -31,6 +32,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from mezna_shared.logging_config import setup_logging
+from mezna_shared.observability import init_sentry
 from mezna_shared.db import get_engine, check_db_connection, dispose_engine
 from mezna_shared.redis_client import get_redis, close_redis
 
@@ -44,6 +46,7 @@ setup_logging(
     debug=settings.DEBUG,
 )
 log = structlog.get_logger()
+init_sentry(service_name=settings.SERVICE_NAME)
 
 
 def _task_done_callback(task: asyncio.Task) -> None:

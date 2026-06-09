@@ -172,6 +172,39 @@ async def fetch_perp_candles(
     return all_candles
 
 
+async def fetch_candles_from_db(
+    db_engine,
+    venue: str,
+    symbol: str,
+    interval: str,
+    start_ms: int,
+    end_ms: int,
+    *,
+    tag_symbol: bool = True,
+) -> list[dict[str, Any]]:
+    """
+    Read persisted OHLCV candles from ohlcv_bars (via mezna_shared.ohlcv).
+
+    Returns the same candle dict shape as fetch_candles ({ts, ts_dt, open, high,
+    low, close, volume, mid}) so the engine consumes DB and REST data identically.
+    Returns [] when there is no data so the caller can fall back to a live fetch.
+
+    mezna_shared is imported lazily — keeps data.py importable in minimal/test
+    environments that don't have the shared package on the path.
+    """
+    from mezna_shared.ohlcv import read_bars
+
+    candles = await read_bars(db_engine, venue, symbol, interval, start_ms, end_ms)
+    if tag_symbol:
+        for c in candles:
+            c["symbol"] = symbol
+    log.info(
+        "data.candles_from_db",
+        venue=venue, symbol=symbol, interval=interval, count=len(candles),
+    )
+    return candles
+
+
 async def fetch_funding_rates(
     client: httpx.AsyncClient,
     settings: Settings,
