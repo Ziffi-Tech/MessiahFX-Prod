@@ -30,7 +30,7 @@ export function RecentSignals() {
         <div className="flex items-center gap-1.5">
           <span className="live-dot" />
           <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-            15s refresh
+            LIVE
           </span>
         </div>
       </div>
