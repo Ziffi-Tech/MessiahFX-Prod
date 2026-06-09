@@ -35,9 +35,11 @@ Goal: earn the right to run the paper validation with confidence.
    `mezna_shared.session` verifies the HS256 token (shared `SESSION_SECRET`) +
    revocation; control actions attribute/authorise off the verified identity, the
    headers are an untrusted fallback. `GATEWAY_REQUIRE_AUTH=true` to require it.
-2. **Fix the test suite + add CI.** Resolve the `app` package collision (unique
-   package names or `sys.modules` isolation in conftests), then a GitHub Actions
-   pipeline: lint + per-service pytest + `next build` on every PR.
+2. ~~**Fix the test suite + add CI.**~~ **DONE** — root conftest
+   `pytest_collectstart` hook resolves the shared `app` package per service, so a
+   single `python -m pytest` runs the full suite (160 tests). GitHub Actions CI
+   (`.github/workflows/ci.yml`): per-service backend matrix + frontend tsc/build +
+   advisory ruff. `scripts/run_tests.sh` runs every suite isolated locally.
 3. **Edge hardening.** Gateway rate limiting, prod-locked CORS (single origin),
    secrets out of `.env` files into Coolify secrets, dependency scanning.
 4. **Reconciliation vs exchange ledger.** Compare journal positions/fills against
