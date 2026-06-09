@@ -2,6 +2,15 @@
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Dev defaults used when CORS_ALLOWED_ORIGINS is not set.
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:8501",
+    "http://dashboard:8501",
+    "http://dashboard-next:3000",
+]
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -12,6 +21,8 @@ class Settings(BaseSettings):
     SERVICE_PORT: int = 8000
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
+    # "production" tightens startup security checks (see main.py lifespan).
+    ENVIRONMENT: str = "development"
 
     # ── Infrastructure ────────────────────────────────────────────────────────
     DATABASE_URL: str
@@ -47,19 +58,27 @@ class Settings(BaseSettings):
     CREDENTIAL_ENCRYPTION_KEY: str = ""
 
     # ── CORS ──────────────────────────────────────────────────────────────────
-    # Restrict in production — dashboard origin only.
-    # localhost:3000/3001 are for Next.js dev server; 8501 for Streamlit (legacy).
-    CORS_ORIGINS: list[str] = [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:8501",
-        "http://dashboard:8501",
-        "http://dashboard-next:3000",
-    ]
+    # Dev defaults apply when unset. In production set this to the single terminal
+    # origin (comma-separated): CORS_ALLOWED_ORIGINS=https://terminal.example.com
+    CORS_ALLOWED_ORIGINS: str = ""
+
+    # ── Rate limiting (Redis fixed window, per operator/IP) ───────────────────
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_REQUESTS: int = 240          # requests per window per client
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+
+    @property
+    def CORS_ORIGINS(self) -> list[str]:
+        parsed = [o.strip() for o in self.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
+        return parsed or _DEFAULT_CORS_ORIGINS
 
     @property
     def credentials_enabled(self) -> bool:
         return bool(self.CREDENTIAL_ENCRYPTION_KEY)
+
+    @property
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT.lower() in ("production", "prod", "live")
 
 
 settings = Settings()

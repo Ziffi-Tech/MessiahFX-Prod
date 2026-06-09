@@ -40,8 +40,11 @@ Goal: earn the right to run the paper validation with confidence.
    single `python -m pytest` runs the full suite (160 tests). GitHub Actions CI
    (`.github/workflows/ci.yml`): per-service backend matrix + frontend tsc/build +
    advisory ruff. `scripts/run_tests.sh` runs every suite isolated locally.
-3. **Edge hardening.** Gateway rate limiting, prod-locked CORS (single origin),
-   secrets out of `.env` files into Coolify secrets, dependency scanning.
+3. ~~**Edge hardening.**~~ **DONE** — gateway Redis rate limiter (pure ASGI,
+   SSE-safe, per-operator/IP), env-locked CORS (`CORS_ALLOWED_ORIGINS`), fail-loud
+   startup on weak secrets / auth-off / open CORS in production, and
+   `docs/security.md` (secrets out of images via `.containerignore` + platform
+   injection). Remaining nice-to-have: dependency scanning in CI.
 4. **Reconciliation vs exchange ledger.** Compare journal positions/fills against
    the venue's reported balances/fills; alert on drift. (Freqtrade/nautilus
    patterns for precision + rate limits.)

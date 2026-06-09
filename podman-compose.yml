@@ -116,6 +116,8 @@ services:
       # Must match the dashboard's SESSION_SECRET so the gateway can verify tokens.
       SESSION_SECRET: ${SESSION_SECRET:-mezna_dev_session_secret_change_me}
       GATEWAY_REQUIRE_AUTH: ${GATEWAY_REQUIRE_AUTH:-false}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
     volumes:
       - ./services/gateway/app:/app/app  # hot-reload in dev
     ports:

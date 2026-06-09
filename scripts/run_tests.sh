@@ -12,6 +12,7 @@ SUITES=(
   "shared/tests"
   "services/ai-filter/tests"
   "services/backtest/tests"
+  "services/gateway/tests"
   "services/journal/tests"
   "services/market-data/tests"
   "services/risk/tests"
