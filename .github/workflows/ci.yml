@@ -24,6 +24,7 @@ jobs:
           - { suite: shared,      path: shared/tests,               reqs: "" }
           - { suite: ai-filter,   path: services/ai-filter/tests,   reqs: services/ai-filter/requirements.txt }
           - { suite: backtest,    path: services/backtest/tests,    reqs: services/backtest/requirements.txt }
+          - { suite: executor,    path: services/executor/tests,    reqs: services/executor/requirements.txt }
           - { suite: gateway,     path: services/gateway/tests,     reqs: services/gateway/requirements.txt }
           - { suite: journal,     path: services/journal/tests,     reqs: services/journal/requirements.txt }
           - { suite: market-data, path: services/market-data/tests, reqs: services/market-data/requirements.txt }

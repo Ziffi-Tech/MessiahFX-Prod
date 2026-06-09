@@ -26,7 +26,8 @@ breach events to review before flipping live.
 
 - [ ] Kill switch tested **in the production environment** (not just locally), and
       the halt propagated to the executor within seconds.
-- [ ] Reconciliation reviewed: journal positions match the exchange ledger.
+- [ ] Reconciliation reviewed: `GET /executor/reconcile/ledger` reports `ok: true`
+      (our positions match the exchange ledger) under live keys.
 - [ ] Risk limits reviewed and set deliberately (`RISK_MAX_*`, drawdown, per-trade).
 - [ ] Real exchange API keys provisioned with **trade-only** scope (no withdrawal).
 - [ ] Per-strategy paper performance reviewed (Sharpe, drawdown, win rate) and

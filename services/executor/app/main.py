@@ -34,7 +34,7 @@ from mezna_shared.db import get_engine, check_db_connection, dispose_engine
 from mezna_shared.redis_client import get_redis, close_redis
 
 from .config import settings
-from .routes import health
+from .routes import health, reconcile
 from .adapters.registry import AdapterRegistry
 from . import consumer
 
@@ -141,6 +141,7 @@ app = FastAPI(
 )
 
 app.include_router(health.router, prefix="/health", tags=["health"])
+app.include_router(reconcile.router, tags=["reconcile"])
 
 from mezna_shared.metrics import setup_metrics
 setup_metrics(app, service_name=settings.SERVICE_NAME)

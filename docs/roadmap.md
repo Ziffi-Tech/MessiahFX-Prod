@@ -45,9 +45,11 @@ Goal: earn the right to run the paper validation with confidence.
    startup on weak secrets / auth-off / open CORS in production, and
    `docs/security.md` (secrets out of images via `.containerignore` + platform
    injection). Remaining nice-to-have: dependency scanning in CI.
-4. **Reconciliation vs exchange ledger.** Compare journal positions/fills against
-   the venue's reported balances/fills; alert on drift. (Freqtrade/nautilus
-   patterns for precision + rate limits.)
+4. ~~**Reconciliation vs exchange ledger.**~~ **DONE** — `mezna_shared.reconciliation`
+   pure drift engine (matched / mismatch / our-only / exch-only, qty + price-bps
+   tolerances; 9 tests) + executor `GET /reconcile/ledger` (ccxt `fetch_positions`
+   for live venues, drift → Redis + `reconciliation.drift` audit). Inert in paper
+   mode. Surfaced through the gateway proxy (`executor` now mapped).
 5. **Order idempotency + state machine.** Guarantee no double-submit across
    restarts; model order lifecycle explicitly (pending→open→filled/partial/rejected).
 6. **Observability that an operator watches.** Grafana dashboards (PnL, fills,

@@ -34,6 +34,7 @@ _UPSTREAM: dict[str, str] = {
     "backtest":    settings.BACKTEST_URL,
     "ai":          settings.AI_FILTER_URL,
     "market-data": settings.MARKET_DATA_URL,
+    "executor":    settings.EXECUTOR_URL,
 }
 
 
