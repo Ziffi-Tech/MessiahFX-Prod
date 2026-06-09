@@ -124,6 +124,14 @@ class RedisKeys:
     # ── Notification Queue ────────────────────────────────────────────────────
     NOTIFICATION_QUEUE = "notifications:queue"
 
+    # ── Session revocation (dashboard auth) ───────────────────────────────────
+    # Epoch (seconds): any session token with iat < this value is revoked.
+    SESSION_REVOKE_ALL = "session:revoke:all"
+
+    @staticmethod
+    def session_revoke_user(sub: str) -> str:
+        return f"session:revoke:user:{sub}"
+
 
 class StreamNames:
     """Redis Stream field names for opportunity signals."""

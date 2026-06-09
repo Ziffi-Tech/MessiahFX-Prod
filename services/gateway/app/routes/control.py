@@ -466,3 +466,69 @@ async def bot_stop(
         "stopped_at": stopped_at.isoformat(),
         "message": "Bot stopped. Kill switch active. Open positions NOT automatically closed.",
     }
+
+
+# ── Session revocation ─────────────────────────────────────────────────────────
+# The dashboard issues stateless signed-session tokens. To revoke without waiting
+# for expiry, we store an epoch in Redis; the dashboard proxy treats any token with
+# iat < epoch as invalid. "all" bumps the global epoch; "user" bumps one operator.
+
+
+class RevokeSessionsRequest(BaseModel):
+    scope: str = "all"          # "all" | "user"
+    user: str | None = None     # required when scope == "user"
+
+
+@router.get("/revocations", summary="Current session-revocation epochs (read by the dashboard proxy)")
+async def get_revocations(request: Request) -> dict:
+    """Return the global + per-user revocation epochs (seconds)."""
+    redis = request.app.state.redis
+    all_epoch = await redis.get(RedisKeys.SESSION_REVOKE_ALL)
+    users: dict[str, int] = {}
+    async for key in redis.scan_iter(match="session:revoke:user:*", count=200):
+        sub = key.split(":")[-1]
+        val = await redis.get(key)
+        if val:
+            try:
+                users[sub] = int(val)
+            except (TypeError, ValueError):
+                pass
+    return {"all": int(all_epoch) if all_epoch else 0, "users": users}
+
+
+@router.post("/revoke-sessions", summary="Revoke sessions (admin) — sign out all or one operator")
+async def revoke_sessions(request: Request, body: RevokeSessionsRequest) -> dict:
+    """
+    Bump a revocation epoch so existing tokens stop being accepted. Admin only
+    (the dashboard proxy forwards the verified role in X-Mezna-Role).
+    """
+    if request.headers.get("x-mezna-role") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin role required")
+
+    redis = request.app.state.redis
+    now = int(datetime.now(timezone.utc).timestamp())
+    actor = _actor(request, "dashboard")
+
+    if body.scope == "user":
+        if not body.user:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user required for scope=user")
+        await redis.set(RedisKeys.session_revoke_user(body.user), now)
+        target = f"user:{body.user}"
+    else:
+        await redis.set(RedisKeys.SESSION_REVOKE_ALL, now)
+        target = "all"
+
+    log.warning("sessions.revoked", target=target, by=actor)
+    async with get_async_session(request.app.state.db_engine) as session:
+        await session.execute(
+            text("""
+                INSERT INTO audit_log (event_type, service, payload, metadata, created_at)
+                VALUES ('sessions.revoked', 'gateway', :payload::jsonb, '{}'::jsonb, :created_at)
+            """),
+            {
+                "payload": json.dumps({"target": target, "by": actor}),
+                "created_at": datetime.now(timezone.utc),
+            },
+        )
+
+    return {"revoked": target, "epoch": now, "by": actor}

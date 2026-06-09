@@ -161,6 +161,9 @@ export const api = {
       req<Record<string, unknown>>("POST", "/api/v1/control/bot/stop", {
         stopped_by: "dashboard", reason,
       }),
+    // Revoke sessions (admin). scope "all" signs everyone out; "user" one operator.
+    revokeSessions: (scope: "all" | "user", user?: string) =>
+      req<Record<string, unknown>>("POST", "/api/v1/control/revoke-sessions", { scope, user }),
   },
 
   // ── Journal ────────────────────────────────────────────────────────────────

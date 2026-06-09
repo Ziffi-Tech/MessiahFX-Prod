@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { verifySession, sessionSecret, SESSION_COOKIE, canWrite } from "@/lib/auth";
+import { isRevoked } from "@/lib/revocation";
 
 // ── Service routing map ────────────────────────────────────────────────────────
 // DEFAULT (production + normal dev): every request goes to the gateway, which
@@ -49,6 +50,11 @@ async function handler(
   const session = token ? await verifySession(token, sessionSecret()) : null;
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Stateless tokens can still be revoked (admin sign-out-all / per-user).
+  if (await isRevoked(session.sub, session.iat)) {
+    return NextResponse.json({ error: "Session revoked" }, { status: 401 });
   }
 
   // RBAC: viewers are read-only — block every mutating method.
