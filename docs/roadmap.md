@@ -103,7 +103,10 @@ The analytics to *judge* the run are built (the 4-week clock itself is operation
   `GET /volatility` + executor opt-in `VOL_TARGET_ENABLED` (relative multiplier from
   bars) + Backtest-page panel. No `arch` dep. See docs/vol-sizing.md.
 - Regime detector validation.
-- Activate the RAG service (Qdrant reserved) for strategy-knowledge grounding.
+- ~~Activate the RAG service (Qdrant) for strategy-knowledge grounding.~~ **DONE** —
+  the service was fully built; wired into the platform (gateway now proxies `/rag/*`,
+  the sole missing link), so RAG Studio (ingest / query / strategy profiles) works end
+  to end. See docs/rag.md. Follow-up: ai-filter consults RAG context before scoring.
 
 ## Phase 4 — Controlled live
 
