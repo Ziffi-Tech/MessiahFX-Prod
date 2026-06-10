@@ -98,7 +98,11 @@ The analytics to *judge* the run are built (the 4-week clock itself is operation
   `GET /pnl/allocation` (date-aligned per-strategy returns → weights + capital split)
   + Allocation panel on the Performance page. riskfolio-lib stayed out (no heavy dep).
   See docs/capital-allocation.md.
-- Regime detector validation; `arch`/GARCH for vol-aware sizing.
+- ~~`arch`/GARCH for vol-aware sizing~~ **DONE** — `mezna_shared.volatility`
+  (pure-Python EWMA + GARCH(1,1) via variance-targeting grid MLE) + backtest
+  `GET /volatility` + executor opt-in `VOL_TARGET_ENABLED` (relative multiplier from
+  bars) + Backtest-page panel. No `arch` dep. See docs/vol-sizing.md.
+- Regime detector validation.
 - Activate the RAG service (Qdrant reserved) for strategy-knowledge grounding.
 
 ## Phase 4 — Controlled live

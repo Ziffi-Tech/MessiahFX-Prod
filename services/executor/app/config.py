@@ -83,6 +83,17 @@ class Settings(BaseSettings):
     # Hard per-position cap as a fraction of equity (independent of Kelly output).
     KELLY_MAX_POSITION_PCT: float = 0.05
 
+    # ── Vol-aware sizing (opt-in) ──────────────────────────────────────────────
+    # OFF by default. When on, scales per-leg notional by a relative volatility
+    # multiplier (long-run vol / recent vol, clamped) computed from persisted bars —
+    # smaller during vol spikes, larger when calm. Unit-free; no absolute target.
+    VOL_TARGET_ENABLED: bool = False
+    VOL_TARGET_INTERVAL: str = "1m"
+    VOL_TARGET_LOOKBACK_BARS: int = 200
+    VOL_TARGET_LAM: float = 0.85
+    VOL_TARGET_MIN: float = 0.5   # floor on the size multiplier
+    VOL_TARGET_MAX: float = 1.5   # cap on the size multiplier
+
     @property
     def mt5_configured(self) -> bool:
         return bool(self.MT5_BRIDGE_URL)

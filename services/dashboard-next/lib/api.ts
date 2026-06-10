@@ -6,7 +6,7 @@ import type {
   StrategyProfile, BacktestResult, MonteCarloResult,
   GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle, OrderBook,
   ReadinessResult, PerformanceByStrategy, TcaReport, WalkForwardResult,
-  StrategyParamsResponse, ParamHistory, AllocationResult,
+  StrategyParamsResponse, ParamHistory, AllocationResult, VolatilityResult,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
 import type { Role } from "@/lib/auth";
@@ -293,6 +293,14 @@ export const api = {
       venue?: string; spot_symbol?: string; perp_symbol?: string; interval?: string;
       days?: number; is_candles?: number; oos_candles?: number; step_candles?: number;
     }) => req<WalkForwardResult>("POST", "/backtest/walk-forward/stat-arb", body),
+    volatility: (params: {
+      venue?: string; symbol?: string; interval?: string; days?: number; method?: string; target_vol?: number;
+    }) => {
+      const q = new URLSearchParams(
+        Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])),
+      ).toString();
+      return req<VolatilityResult>("GET", `/backtest/volatility${q ? `?${q}` : ""}`);
+    },
   },
 
   // ── Parameter governance ─────────────────────────────────────────────────────

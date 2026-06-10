@@ -259,6 +259,26 @@ export interface StrategyOverview {
   timestamp: string;
 }
 
+// ── Volatility forecast + vol-aware sizing ──────────────────────────────────
+
+export interface VolatilityResult {
+  status: string;
+  venue?: string;
+  symbol?: string;
+  interval?: string;
+  days?: number;
+  method?: string;
+  returns?: number;
+  forecast_vol_per_period?: number;
+  forecast_vol_annualized?: number;
+  periods_per_year?: number;
+  garch_params?: { omega: number; alpha: number; beta: number; loglik: number } | null;
+  target_vol_annualized?: number;
+  sizing_multiplier?: number;
+  detail?: string;
+  candles?: number;
+}
+
 // ── Capital allocation ──────────────────────────────────────────────────────
 
 export interface AllocationStrategy {
