@@ -5,7 +5,7 @@ import type {
   StrategyConfig, RiskState, RagQuery, RagResponse,
   StrategyProfile, BacktestResult, MonteCarloResult,
   GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle, OrderBook,
-  ReadinessResult, PerformanceByStrategy, TcaReport,
+  ReadinessResult, PerformanceByStrategy, TcaReport, WalkForwardResult,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
 import type { Role } from "@/lib/auth";
@@ -283,6 +283,10 @@ export const api = {
     }) => req<{ ranked_results: GridSearchEntry[]; best_params: Record<string, number>; combinations_run: number; warning: string }>(
       "POST", "/backtest/optimize/stat-arb", body
     ),
+    walkForwardStatArb: (body: {
+      venue?: string; spot_symbol?: string; perp_symbol?: string; interval?: string;
+      days?: number; is_candles?: number; oos_candles?: number; step_candles?: number;
+    }) => req<WalkForwardResult>("POST", "/backtest/walk-forward/stat-arb", body),
   },
 
   // ── RAG ────────────────────────────────────────────────────────────────────

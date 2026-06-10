@@ -1,6 +1,6 @@
 # ADR 0001 — Defer vectorbt for the backtest engine
 
-- **Status:** Deferred (re-assessed 2026-06-08)
+- **Status:** Deferred — walk-forward delivered engine-native (updated 2026-06-10; see end)
 - **Service:** `services/backtest`
 - **Supersedes:** the informal "vectorbt deferred — numpy-2/numba compat" note
 
@@ -61,3 +61,16 @@ then force a numpy split across services.
 - numba still supports the platform's numpy (re-check the `<2.5` ceiling).
 
 Until then the existing engine is the supported backtest path.
+
+## Update (2026-06-10 — Phase 3: walk-forward delivered without vectorbt)
+
+Persisted OHLCV now exists, and **walk-forward analysis is implemented on the
+existing engine** (`backtest/app/walk_forward.py` + `POST /walk-forward/stat-arb`):
+rolling IS/OOS splits, optimise on in-sample, test on out-of-sample, with a
+walk-forward-efficiency ratio, a parameter-stability surface, and a
+robust/marginal/overfit verdict. This delivers the out-of-sample validation
+vectorbt was wanted for — without its 45-package footprint or the paradigm port.
+
+vectorbt therefore remains **deferred**, now purely as an optional *accelerator*
+for very large parameter grids (vectorised sweeps), not a capability gap. Revisit
+only if grid sizes make the engine-native sweep too slow in practice.

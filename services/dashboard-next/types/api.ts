@@ -259,6 +259,49 @@ export interface StrategyOverview {
   timestamp: string;
 }
 
+// ── Walk-forward analysis (out-of-sample validation) ───────────────────────
+
+export interface WfaFold {
+  params: { window: number; entry_z: number };
+  is_sharpe: number;
+  is_trades: number;
+  oos_sharpe: number;
+  oos_net_pnl: number;
+  oos_trades: number;
+  oos_win_rate: number;
+  oos_max_drawdown_pct: number;
+  oos_start_dt: string;
+  oos_end_dt: string;
+}
+
+export interface WfaSummary {
+  folds: number;
+  verdict: string;
+  median_oos_sharpe: number | null;
+  mean_oos_sharpe: number | null;
+  mean_is_sharpe?: number | null;
+  walk_forward_efficiency: number | null;
+  positive_fold_fraction: number | null;
+  total_oos_net_pnl: number;
+  total_oos_trades: number;
+  parameter_stability: Record<string, { distinct: number; mode: number; mode_fraction: number }>;
+}
+
+export interface WalkForwardResult {
+  status: string;
+  strategy?: string;
+  symbols?: string;
+  interval?: string;
+  days?: number;
+  aligned_candles?: number;
+  windows?: number;
+  folds?: WfaFold[];
+  summary?: WfaSummary;
+  detail?: string;
+  spot_candles?: number;
+  perp_candles?: number;
+}
+
 // ── Performance review + TCA (paper validation) ────────────────────────────
 
 export interface StrategyPerformance {
