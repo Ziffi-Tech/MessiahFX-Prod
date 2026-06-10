@@ -28,7 +28,7 @@ function Row({ c, advisory = false }: { c: ReadinessCriterion; advisory?: boolea
         <div className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>{c.detail}</div>
       </div>
       <span className="mono text-[11px]" style={{ color }}>
-        {c.value}{c.threshold ? ` / ${c.threshold}` : ""}
+        {c.value}{c.threshold !== undefined && c.threshold !== null ? ` / ${c.threshold}` : ""}
       </span>
     </div>
   );
