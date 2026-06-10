@@ -121,6 +121,12 @@ class RedisKeys:
     # ── Execution queue (risk-approved signals ready for executor) ────────────
     SIGNALS_EXECUTION_QUEUE = "signals:execution_queue"
 
+    # String (JSON): recorded OrderResult per client_order_id, for idempotent
+    # replay — a redelivered leg reuses the stored result instead of resubmitting.
+    @staticmethod
+    def execution_result(client_order_id: str) -> str:
+        return f"execution:result:{client_order_id}"
+
     # ── Notification Queue ────────────────────────────────────────────────────
     NOTIFICATION_QUEUE = "notifications:queue"
 

@@ -59,6 +59,8 @@ from mezna_shared.regime_map import preferred_for_regime
 from mezna_shared.kelly import get_strategy_kelly_fraction, kelly_position_usd
 from mezna_shared.audit import write_audit_log
 from mezna_shared.opportunities import mark_opportunity_executed
+from mezna_shared.order_ids import make_client_order_id
+from .idempotency import recover_result, record_result
 from .adapters import OrderRequest, OrderResult
 from .adapters.registry import AdapterRegistry
 from . import db as trade_db
@@ -501,26 +503,37 @@ def _build_order_plan(payload: dict) -> list[dict]:
 
 # ── Adapter routing ───────────────────────────────────────────────────────────
 
+# Idempotent-replay recovery: how long a recorded result is reusable. Long enough
+# to cover restart/redelivery windows; a much later replay is vanishingly unlikely.
+_RESULT_TTL_SECONDS = 86400  # 24h
+
+
 async def _execute_leg(
     leg: dict,
     quantity: float,
     opportunity_id: str | None,
+    leg_index: int,
     payload: dict,
     settings: Settings,
     registry: AdapterRegistry,
+    redis: Redis,
 ) -> tuple[OrderRequest, OrderResult]:
     """
     Build an OrderRequest and route it through the venue adapter registry.
     Returns (order, result) — never raises.
 
-    Routing is fully data-driven: resolve_adapter() picks the adapter for the
-    leg's venue (or the paper adapter in paper mode). Adding a venue is a registry
-    change only — this function never grows a new branch.
+    Idempotency: the client_order_id is DETERMINISTIC per (opportunity, leg, side,
+    symbol), so a redelivered message maps to the same id. Before submitting we
+    check Redis for a recorded result under that id; if present (a replay), we
+    REUSE it instead of resubmitting — preventing a duplicate exchange order while
+    still letting persistence run (idempotent at the DB via ON CONFLICT).
     """
-    client_order_id = str(uuid.uuid4())
     venue = leg["venue"]
     symbol = leg["symbol"]
     side = leg["side"]
+
+    client_order_id = make_client_order_id(opportunity_id, leg_index, side, symbol)
+    result_key = RedisKeys.execution_result(client_order_id)
 
     order = OrderRequest(
         client_order_id=client_order_id,
@@ -533,6 +546,17 @@ async def _execute_leg(
         opportunity_id=opportunity_id,
         paper_mode=settings.is_paper,
     )
+
+    # ── Idempotent replay: reuse a previously recorded result, never resubmit ──
+    recovered = await recover_result(redis, result_key)
+    if recovered is not None:
+        log.warning(
+            "executor.idempotent_replay",
+            client_order_id=client_order_id,
+            venue=venue, symbol=symbol, side=side,
+            hint="reusing recorded result — order NOT resubmitted",
+        )
+        return order, recovered
 
     try:
         adapter = registry.resolve(venue)
@@ -560,6 +584,9 @@ async def _execute_leg(
             rejection_reason=str(exc),
             raw_response={},
         )
+
+    # Record the result for idempotent replay (best-effort — never blocks the fill).
+    await record_result(redis, result_key, result, _RESULT_TTL_SECONDS)
 
     return order, result
 
@@ -717,14 +744,16 @@ async def _process(
             fills_attempted += 1
             continue
 
-        # Submit order via the venue adapter registry
+        # Submit order via the venue adapter registry (idempotent on replay)
         order, result = await _execute_leg(
             leg=leg,
             quantity=quantity,
             opportunity_id=opportunity_id,
+            leg_index=i,
             payload=payload,
             settings=settings,
             registry=registry,
+            redis=redis,
         )
         fills_attempted += 1
 
