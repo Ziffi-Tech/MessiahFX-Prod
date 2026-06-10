@@ -27,9 +27,10 @@ principle that matters here: **capital safety before polish.**
 
 ---
 
-## Phase 1 — Hardening (pre-live, the critical path)
+## Phase 1 — Hardening (pre-live, the critical path) — ✅ COMPLETE (1.1–1.7)
 
-Goal: earn the right to run the paper validation with confidence.
+Goal: earn the right to run the paper validation with confidence. All seven items
+done and tested (201-test suite + CI). The platform is now ready for the paper run.
 
 1. ~~**Gateway verifies the session token** (defense in depth).~~ **DONE** —
    `mezna_shared.session` verifies the HS256 token (shared `SESSION_SECRET`) +
@@ -99,14 +100,16 @@ Goal: earn the right to run the paper validation with confidence.
 
 ---
 
-## Next 5 concrete actions
+## Next actions (Phase 1 done)
 
-1. Gateway-side token verification (Phase 1.1) — highest security leverage, small.
-2. Fix `app` package collision + stand up CI (Phase 1.2) — unblocks safe iteration.
-3. Exchange-ledger reconciliation + drift alert (Phase 1.4) — trust your numbers.
-4. Grafana operator dashboards + feed-dead/drawdown alerts (Phase 1.6).
-5. Start the paper run; drive the readiness gate to green (Phase 2).
+1. **Deploy with prod config** — `ENVIRONMENT=production`, strong `SESSION_SECRET`
+   (gateway + dashboard), `GATEWAY_REQUIRE_AUTH=true`, locked `CORS_ALLOWED_ORIGINS`,
+   schedule the backups. Rebuild images (new shared/gateway modules).
+2. **Start the paper run** — drive the Go-Live Readiness gate to green; watch the
+   Operator dashboard + alerts.
+3. **Phase 3 in parallel** — vectorbt walk-forward (now unblocked), TCA/slippage,
+   parameter governance.
 
-The terminal is product-ready as an operator surface. The platform becomes
-product-ready when Phase 1 is done and the paper run proves it trades cleanly for
-four weeks — then, and only then, live.
+The terminal is product-ready as an operator surface and Phase 1 hardening is
+complete. The platform becomes product-ready when the paper run proves it trades
+cleanly for four weeks — then, and only then, live.
