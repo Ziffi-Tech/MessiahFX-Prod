@@ -1,0 +1,35 @@
+# Mirror of .containerignore — the `podman compose` (docker-compose) provider reads
+# .dockerignore, NOT .containerignore. Keep both in sync. Without this, the build
+# context scan of the host node_modules fails on Windows ("insufficient resources").
+
+# Node / Next.js
+**/node_modules
+**/.next
+**/.turbo
+**/*.tsbuildinfo
+
+# Python
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/venv
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# VCS / editor / OS
+.git
+.gitignore
+**/.DS_Store
+.idea
+.vscode
+
+# Local env + secrets — never bake into images
+**/.env
+**/.env.*
+!**/.env.example
+
+# Tooling / docs that images don't need
+.claude
+.playwright-mcp
+**/*.log

@@ -1,0 +1,18 @@
+# Dev image for the Next.js terminal — runs `next dev` with HMR.
+# Used only by podman-compose.dev.yml. The source is bind-mounted at runtime;
+# node_modules + .next live in anonymous volumes (see the dev override) so the
+# host mount doesn't clobber the container's Alpine node_modules.
+FROM node:22-alpine
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@9 --activate
+
+# Install deps in a cached layer (only re-runs when the lockfile changes).
+COPY services/dashboard-next/package.json services/dashboard-next/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+# Seed the source (the bind mount overlays this at runtime).
+COPY services/dashboard-next/ .
+
+EXPOSE 3000
+CMD ["pnpm", "dev"]

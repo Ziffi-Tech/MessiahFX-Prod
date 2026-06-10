@@ -55,6 +55,19 @@ build-service: ## Build a single service: make build-service SERVICE=gateway
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
 
+# Dev hot-reload: host code edits reflect in running containers instantly.
+# Uses the docker-compose provider (honours .dockerignore + YAML merge). See
+# docs/dev-hot-reload.md. On Windows prefer: pwsh scripts/dev-up.ps1
+DEV_COMPOSE := podman compose -p mezna -f podman-compose.yml -f podman-compose.dev.yml
+
+.PHONY: dev
+dev: ## Start the stack with hot-reload (uvicorn --reload + next dev)
+	$(DEV_COMPOSE) up -d
+
+.PHONY: dev-down
+dev-down: ## Stop the hot-reload stack
+	$(DEV_COMPOSE) down
+
 .PHONY: up
 up: ## Start all services (detached)
 	$(COMPOSE) up -d
