@@ -26,6 +26,12 @@ x-pydev: &pydev
     - ./shared/mezna_shared:/app/mezna_shared
 
 services:
+  # Mount the migrations dir so new migrations apply on `up migrate` without
+  # rebuilding the image (they're baked in at build time otherwise).
+  migrate:
+    volumes:
+      - ./migrations:/app/migrations
+
   gateway:
     <<: *pydev
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]

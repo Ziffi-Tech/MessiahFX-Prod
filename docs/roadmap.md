@@ -128,9 +128,14 @@ The analytics to *judge* the run are built (the 4-week clock itself is operation
   SSE tick store with per-cell flash (FlashCell); journal already has filters + CSV
   export; route error boundaries (`error.tsx` + `global-error.tsx`) replace
   white-screens with a recoverable fallback.
-- Remaining: multi-workspace layouts, responsive/mobile, accessibility.
-- Multi-account / multi-tenant if needed; per-venue feed scaling; Timescale
-  retention + compression policies; horizontal scaling of stateless services.
+- ~~Timescale retention + compression policies~~ **DONE** — migration `005` converts
+  `opportunities`/`audit_log`/`market_snapshots` to hypertables (the conversion 001
+  deferred) + non-destructive compression + 90d retention on `market_snapshots` only.
+  Applied + verified live. `trades` kept plain (preserves `client_order_id` idempotency).
+  See docs/scale.md.
+- Remaining: multi-workspace layouts, responsive/mobile, accessibility; multi-account /
+  multi-tenant if needed; per-venue feed scaling; horizontal scaling of stateless
+  services; continuous aggregates for dashboard rollups.
 
 ---
 
