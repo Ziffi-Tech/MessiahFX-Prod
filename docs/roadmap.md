@@ -50,11 +50,17 @@ Goal: earn the right to run the paper validation with confidence.
    tolerances; 9 tests) + executor `GET /reconcile/ledger` (ccxt `fetch_positions`
    for live venues, drift → Redis + `reconciliation.drift` audit). Inert in paper
    mode. Surfaced through the gateway proxy (`executor` now mapped).
-5. **Order idempotency + state machine.** Guarantee no double-submit across
-   restarts; model order lifecycle explicitly (pending→open→filled/partial/rejected).
-6. **Observability that an operator watches.** Grafana dashboards (PnL, fills,
-   feed health, latency SLOs), Loki log views, and alerts (feed dead, drawdown
-   near limit, reconciliation drift) to Telegram/Discord.
+5. ~~**Order idempotency + state machine.**~~ **DONE** — deterministic
+   `client_order_id` per leg (`mezna_shared.order_ids`) makes DB + exchange dedup
+   effective across replays; the executor recovers a recorded result from Redis and
+   reuses it instead of resubmitting. `mezna_shared.order_state` models the lifecycle
+   for future limit/async orders. 14 tests.
+6. ~~**Observability that an operator watches.**~~ **DONE** — feed-health +
+   risk/drawdown Prometheus gauges (new exporters), an Operator Overview Grafana
+   dashboard (auto-provisioned), and alert rules (service down, feed down, drawdown
+   near limit, halted, high error/latency). Services also push feed-down/drawdown
+   warnings to the notifications queue (Telegram/Discord) — alerting works without
+   an alertmanager. See docs/observability.md.
 7. **Backups + recovery drill.** Postgres backups + Redis AOF verified; restore
    tested; document RTO/RPO.
 

@@ -34,6 +34,7 @@ from mezna_shared.schemas.risk import RiskState
 from .config import settings
 from .routes import health
 from . import consumer
+from . import metrics_exporter
 from .state import check_and_reset_daily
 
 setup_logging(
@@ -113,6 +114,12 @@ async def lifespan(app: FastAPI):
     )
     _consumer_task.add_done_callback(_on_consumer_done)
 
+    # ── Risk-state metrics exporter (gauges + drawdown warning) ────────────────
+    _metrics_task = asyncio.create_task(
+        metrics_exporter.run(settings, app.state.redis),
+        name="risk_metrics_exporter",
+    )
+
     log.info(
         "service.ready",
         service=settings.SERVICE_NAME,
@@ -128,12 +135,13 @@ async def lifespan(app: FastAPI):
 
     log.info("service.stopping", service=settings.SERVICE_NAME)
 
-    if _consumer_task and not _consumer_task.done():
-        _consumer_task.cancel()
-        try:
-            await _consumer_task
-        except asyncio.CancelledError:
-            pass
+    for _task in (_consumer_task, _metrics_task):
+        if _task and not _task.done():
+            _task.cancel()
+            try:
+                await _task
+            except asyncio.CancelledError:
+                pass
 
     await close_redis()
     await dispose_engine()
