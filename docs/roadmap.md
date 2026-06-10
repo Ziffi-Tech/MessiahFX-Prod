@@ -123,8 +123,12 @@ The analytics to *judge* the run are built (the 4-week clock itself is operation
 
 ## Phase 5 — Product polish & scale
 
-- Live positions blotter (row-flash), journal filters/export, error boundaries,
-  multi-workspace layouts, responsive/mobile, accessibility.
+- ~~Live positions blotter (row-flash), journal filters/export, error boundaries~~
+  **DONE** — positions page now shows live Current price + unrealized P&L from the
+  SSE tick store with per-cell flash (FlashCell); journal already has filters + CSV
+  export; route error boundaries (`error.tsx` + `global-error.tsx`) replace
+  white-screens with a recoverable fallback.
+- Remaining: multi-workspace layouts, responsive/mobile, accessibility.
 - Multi-account / multi-tenant if needed; per-venue feed scaling; Timescale
   retention + compression policies; horizontal scaling of stateless services.
 
