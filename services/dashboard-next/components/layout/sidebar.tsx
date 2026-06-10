@@ -16,6 +16,7 @@ import {
   LogOut,
   Bot,
   UserCircle2,
+  LineChart,
 } from "lucide-react";
 
 const NAV = [
@@ -23,6 +24,7 @@ const NAV = [
   { href: "/positions",   label: "Positions",   icon: TrendingUp },
   { href: "/strategies",  label: "Strategies",  icon: Settings2 },
   { href: "/backtest",    label: "Backtest",     icon: BarChart3 },
+  { href: "/performance", label: "Performance",  icon: LineChart },
   { href: "/risk",        label: "Risk",         icon: Shield },
   { href: "/journal",     label: "Journal",      icon: ScrollText },
   { href: "/rag",         label: "RAG Studio",   icon: BookOpen },

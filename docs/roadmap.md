@@ -67,13 +67,18 @@ done and tested (201-test suite + CI). The platform is now ready for the paper r
    `scripts/restore-postgres.sh` (confirmed, idempotent). `docs/backups.md`:
    schedule, RTO/RPO, and a quarterly restore drill. `backups/` gitignored.
 
-## Phase 2 — Paper validation (4+ weeks)
+## Phase 2 — Paper validation (4+ weeks) — tooling ✅, run in progress
 
-- Run paper with real feeds; watch the **Go-Live Readiness** gate to green.
-- Transaction-cost analysis: model slippage + fees against fills; compare to
-  backtest assumptions.
-- Per-strategy review: Sharpe/Sortino/drawdown/win-rate — judged *good*, not just
-  green. Cut or retune underperformers.
+The analytics to *judge* the run are built (the 4-week clock itself is operational):
+
+- ~~Transaction-cost analysis~~ **DONE** — `GET /journal/pnl/tca`: realised fees
+  (in bps of notional) + slippage per (strategy, venue). Compare vs backtest assumptions.
+- ~~Per-strategy review~~ **DONE** — `GET /journal/pnl/by-strategy`:
+  Sharpe / Sortino / max-drawdown / win-rate / profit-factor / realised P&L per strategy.
+- **Performance** terminal page surfaces both + the readiness gate. See
+  docs/paper-validation.md.
+- **Operational (you):** run paper with real feeds; drive the readiness gate green;
+  judge each strategy *good*, not just green; cut/retune laggards.
 
 ## Phase 3 — Quant depth (parallelizable with Phase 2)
 

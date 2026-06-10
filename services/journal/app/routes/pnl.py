@@ -124,6 +124,26 @@ async def pnl_summary(
     })
 
 
+@router.get("/by-strategy")
+async def pnl_by_strategy(
+    request: Request,
+    days: int = Query(30, ge=1, le=365),
+) -> JSONResponse:
+    """Per-strategy performance review (win/loss + Sharpe/Sortino/max drawdown)."""
+    data = await queries.performance_by_strategy(request.app.state.db_engine, days=days)
+    return JSONResponse(content=data)
+
+
+@router.get("/tca")
+async def pnl_tca(
+    request: Request,
+    days: int = Query(30, ge=1, le=365),
+) -> JSONResponse:
+    """Transaction-cost analysis — realised fees + slippage per (strategy, venue)."""
+    data = await queries.tca_report(request.app.state.db_engine, days=days)
+    return JSONResponse(content=data)
+
+
 @router.get("/positions")
 async def pnl_positions(
     request: Request,

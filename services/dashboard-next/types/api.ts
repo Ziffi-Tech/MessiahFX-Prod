@@ -259,6 +259,45 @@ export interface StrategyOverview {
   timestamp: string;
 }
 
+// ── Performance review + TCA (paper validation) ────────────────────────────
+
+export interface StrategyPerformance {
+  strategy_type: string;
+  filled_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;          // fraction 0..1
+  average_win: number;
+  average_loss: number;
+  profit_factor: number | null;
+  realized_pnl: number;
+  total_fees: number;
+  max_drawdown_pct: number;
+  sharpe_ratio: number | null;
+  sortino_ratio: number | null;
+}
+
+export interface PerformanceByStrategy {
+  days: number;
+  strategies: StrategyPerformance[];
+}
+
+export interface TcaRow {
+  strategy_type: string;
+  venue: string;
+  fills: number;
+  notional: number;
+  total_fees: number;
+  fee_bps: number;
+  avg_slippage_bps: number;
+}
+
+export interface TcaReport {
+  days: number;
+  rows: TcaRow[];
+  totals: { notional: number; total_fees: number; fee_bps: number };
+}
+
 // ── Go-live readiness ──────────────────────────────────────────────────────
 
 export interface ReadinessCriterion {
