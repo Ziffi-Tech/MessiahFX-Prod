@@ -99,3 +99,6 @@ uploads/
 
 # Stale nested project duplicate (has its own .git) — never track
 /MessiahFX-Prod/
+
+# Backup artifacts (never commit dumps)
+/backups/

@@ -61,8 +61,10 @@ Goal: earn the right to run the paper validation with confidence.
    near limit, halted, high error/latency). Services also push feed-down/drawdown
    warnings to the notifications queue (Telegram/Discord) — alerting works without
    an alertmanager. See docs/observability.md.
-7. **Backups + recovery drill.** Postgres backups + Redis AOF verified; restore
-   tested; document RTO/RPO.
+7. ~~**Backups + recovery drill.**~~ **DONE** — `scripts/backup-postgres.sh`
+   (gzip pg_dump --clean, retention), `scripts/backup-redis.sh` (BGSAVE + copy),
+   `scripts/restore-postgres.sh` (confirmed, idempotent). `docs/backups.md`:
+   schedule, RTO/RPO, and a quarterly restore drill. `backups/` gitignored.
 
 ## Phase 2 — Paper validation (4+ weeks)
 
