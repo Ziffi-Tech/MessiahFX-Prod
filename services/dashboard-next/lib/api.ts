@@ -5,7 +5,7 @@ import type {
   StrategyConfig, RiskState, RagQuery, RagResponse,
   StrategyProfile, BacktestResult, MonteCarloResult,
   GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle, OrderBook,
-  ReadinessResult,
+  ReadinessResult, PerformanceByStrategy, TcaReport,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
 import type { Role } from "@/lib/auth";
@@ -188,6 +188,10 @@ export const api = {
         "GET", `/journal/opportunities?limit=${limit}`
       ),
     readiness: () => req<ReadinessResult>("GET", "/journal/readiness"),
+    byStrategy: (days = 30) =>
+      req<PerformanceByStrategy>("GET", `/journal/pnl/by-strategy?days=${days}`),
+    tca: (days = 30) =>
+      req<TcaReport>("GET", `/journal/pnl/tca?days=${days}`),
   },
 
   // ── Strategies ─────────────────────────────────────────────────────────────

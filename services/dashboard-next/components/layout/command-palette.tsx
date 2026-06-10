@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   LayoutDashboard, TrendingUp, Settings2, BarChart3, Shield, ScrollText,
-  BookOpen, Settings, Play, Square, AlertOctagon, Search, CornerDownLeft,
+  BookOpen, Settings, Play, Square, AlertOctagon, Search, CornerDownLeft, LineChart,
 } from "lucide-react";
 import { useBotStart, useBotStop, useKillSwitch, useAuth } from "@/lib/hooks";
 
@@ -44,6 +44,7 @@ export function CommandPalette() {
       nav("/positions", "Positions & P&L", TrendingUp),
       nav("/strategies", "Strategy Controls", Settings2),
       nav("/backtest", "Backtest & Optimiser", BarChart3),
+      nav("/performance", "Performance & TCA", LineChart),
       nav("/risk", "Risk Monitor", Shield),
       nav("/journal", "Trade Journal", ScrollText),
       nav("/rag", "RAG Studio", BookOpen),

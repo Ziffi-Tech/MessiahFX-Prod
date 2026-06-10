@@ -341,6 +341,181 @@ def summary_curve_metrics(rows: list[dict]) -> tuple[float, float | None]:
     return round(max_dd_pct, 4), sharpe
 
 
+# ── Performance metrics (per-strategy review + TCA) ────────────────────────────
+
+def _daily_series(rows: list[dict]) -> list[float]:
+    """Collapse daily_pnl rows into one ascending daily realized-P&L series."""
+    from collections import defaultdict
+    by_date: dict[str, float] = defaultdict(float)
+    for r in rows:
+        by_date[str(r.get("trade_date"))] += float(r.get("realized_pnl", 0) or 0)
+    return [by_date[d] for d in sorted(by_date)]
+
+
+def _max_drawdown_pct(daily: list[float]) -> float:
+    cum = peak = mdd = 0.0
+    for x in daily:
+        cum += x
+        peak = max(peak, cum)
+        if peak > 0:
+            mdd = max(mdd, (peak - cum) / peak * 100.0)
+    return round(mdd, 4)
+
+
+def _sharpe(daily: list[float]) -> float | None:
+    import math
+    if len(daily) < 2:
+        return None
+    mean = sum(daily) / len(daily)
+    var = sum((x - mean) ** 2 for x in daily) / (len(daily) - 1)
+    std = math.sqrt(var)
+    return round(mean / std * math.sqrt(252), 4) if std > 0 else None
+
+
+def _sortino(daily: list[float]) -> float | None:
+    """Annualised Sortino — mean / downside deviation × √252. None if no downside."""
+    import math
+    if len(daily) < 2:
+        return None
+    mean = sum(daily) / len(daily)
+    downside = sum(min(0.0, x) ** 2 for x in daily) / len(daily)
+    dd = math.sqrt(downside)
+    return round(mean / dd * math.sqrt(252), 4) if dd > 0 else None
+
+
+def curve_performance(rows: list[dict]) -> dict:
+    """Pure: max_drawdown_pct + Sharpe + Sortino from daily_pnl rows."""
+    daily = _daily_series(rows)
+    return {
+        "max_drawdown_pct": _max_drawdown_pct(daily),
+        "sharpe_ratio": _sharpe(daily),
+        "sortino_ratio": _sortino(daily),
+    }
+
+
+def cost_bps(cost: float, notional: float) -> float:
+    """Cost (fee or slippage notional) as basis points of traded notional."""
+    return round(cost / notional * 10_000.0, 4) if notional > 0 else 0.0
+
+
+_PERF_BY_STRATEGY = text("""
+    SELECT
+        strategy_type,
+        COUNT(*)                                                    AS filled_trades,
+        COUNT(*) FILTER (WHERE realized_pnl > 0)                    AS winning_trades,
+        COUNT(*) FILTER (WHERE realized_pnl < 0)                    AS losing_trades,
+        COALESCE(AVG(realized_pnl) FILTER (WHERE realized_pnl > 0), 0)      AS avg_win_usd,
+        COALESCE(AVG(ABS(realized_pnl)) FILTER (WHERE realized_pnl < 0), 0) AS avg_loss_usd,
+        COALESCE(SUM(realized_pnl), 0)                              AS total_realized_pnl,
+        COALESCE(SUM(fee), 0)                                       AS total_fees_usd
+    FROM trades
+    WHERE status = 'filled' AND filled_at IS NOT NULL
+      AND filled_at >= NOW() - make_interval(days => :days)
+    GROUP BY strategy_type
+""")
+
+
+async def performance_by_strategy(db_engine: AsyncEngine, *, days: int = 30) -> dict:
+    """
+    Per-strategy performance review for the paper run: trade-level win/loss stats
+    plus equity-shape metrics (Sharpe, Sortino, max drawdown) — judge each strategy
+    'good', not just green, and cut/retune the laggards.
+    """
+    from collections import defaultdict
+
+    async with get_async_session(db_engine) as session:
+        stat_rows = (await session.execute(_PERF_BY_STRATEGY, {"days": days})).fetchall()
+
+    daily_rows = await daily_pnl(db_engine, days=days)
+    daily_by_strategy: dict[str, list[dict]] = defaultdict(list)
+    for r in daily_rows:
+        daily_by_strategy[r.get("strategy_type")].append(r)
+
+    strategies: list[dict] = []
+    for row in stat_rows:
+        d = _row_to_dict(row)
+        strat = d.get("strategy_type")
+        wins = int(d.get("winning_trades", 0) or 0)
+        losses = int(d.get("losing_trades", 0) or 0)
+        avg_win = float(d.get("avg_win_usd", 0) or 0)
+        avg_loss = float(d.get("avg_loss_usd", 0) or 0)
+        win_rate = wins / (wins + losses) if (wins + losses) > 0 else 0.0
+        gross_profit = avg_win * wins
+        gross_loss = avg_loss * losses
+        profit_factor = round(gross_profit / gross_loss, 4) if gross_loss > 0 else None
+
+        strategies.append({
+            "strategy_type": strat,
+            "filled_trades": int(d.get("filled_trades", 0) or 0),
+            "winning_trades": wins,
+            "losing_trades": losses,
+            "win_rate": round(win_rate, 6),
+            "average_win": round(avg_win, 6),
+            "average_loss": round(avg_loss, 6),
+            "profit_factor": profit_factor,
+            "realized_pnl": round(float(d.get("total_realized_pnl", 0) or 0), 6),
+            "total_fees": round(float(d.get("total_fees_usd", 0) or 0), 6),
+            **curve_performance(daily_by_strategy.get(strat, [])),
+        })
+
+    strategies.sort(key=lambda s: s["realized_pnl"], reverse=True)
+    return {"days": days, "strategies": strategies}
+
+
+_TCA = text("""
+    SELECT
+        strategy_type,
+        venue,
+        COUNT(*)                                          AS fills,
+        COALESCE(SUM(filled_qty * average_fill_price), 0) AS notional,
+        COALESCE(SUM(fee), 0)                             AS total_fees,
+        COALESCE(AVG(slippage_bps), 0)                    AS avg_slippage_bps
+    FROM trades
+    WHERE status = 'filled' AND filled_at IS NOT NULL
+      AND filled_at >= NOW() - make_interval(days => :days)
+    GROUP BY strategy_type, venue
+    ORDER BY notional DESC
+""")
+
+
+async def tca_report(db_engine: AsyncEngine, *, days: int = 30) -> dict:
+    """
+    Transaction-cost analysis: realised fees + slippage per (strategy, venue), with
+    fee in basis points of notional — compare against the backtest's fee/slippage
+    assumptions before trusting its edge.
+    """
+    async with get_async_session(db_engine) as session:
+        rows = (await session.execute(_TCA, {"days": days})).fetchall()
+
+    out: list[dict] = []
+    tot_notional = tot_fees = 0.0
+    for row in rows:
+        d = _row_to_dict(row)
+        notional = float(d.get("notional", 0) or 0)
+        fees = float(d.get("total_fees", 0) or 0)
+        tot_notional += notional
+        tot_fees += fees
+        out.append({
+            "strategy_type": d.get("strategy_type"),
+            "venue": d.get("venue"),
+            "fills": int(d.get("fills", 0) or 0),
+            "notional": round(notional, 2),
+            "total_fees": round(fees, 6),
+            "fee_bps": cost_bps(fees, notional),
+            "avg_slippage_bps": round(float(d.get("avg_slippage_bps", 0) or 0), 4),
+        })
+
+    return {
+        "days": days,
+        "rows": out,
+        "totals": {
+            "notional": round(tot_notional, 2),
+            "total_fees": round(tot_fees, 6),
+            "fee_bps": cost_bps(tot_fees, tot_notional),
+        },
+    }
+
+
 # ── Kelly sizing inputs ───────────────────────────────────────────────────────
 
 _KELLY_STATS = text("""

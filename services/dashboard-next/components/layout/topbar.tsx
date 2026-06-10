@@ -10,6 +10,7 @@ const ROUTE_TITLES: Record<string, string> = {
   "/positions":  "Positions & P&L",
   "/strategies": "Strategy Controls",
   "/backtest":   "Backtest & Optimiser",
+  "/performance": "Performance & TCA",
   "/risk":       "Risk Monitor",
   "/journal":    "Trade Journal",
   "/rag":        "RAG Studio",
