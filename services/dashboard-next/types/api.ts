@@ -259,6 +259,41 @@ export interface StrategyOverview {
   timestamp: string;
 }
 
+// ── Parameter governance ────────────────────────────────────────────────────
+
+export interface StrategyParamsResponse {
+  strategy_type: string;
+  params: Record<string, unknown>;
+  hash: string;
+  version: number;
+  updated_by: string;
+  updated_at: string | null;
+}
+
+export interface ParamDiff {
+  added: Record<string, unknown>;
+  removed: Record<string, unknown>;
+  changed: Record<string, { old: unknown; new: unknown }>;
+}
+
+export interface ParamHistoryEntry {
+  strategy_type: string;
+  params: Record<string, unknown>;
+  hash: string;
+  version: number;
+  diff?: ParamDiff;
+  source?: string;
+  reason?: string;
+  by?: string;
+  created_at?: string;
+}
+
+export interface ParamHistory {
+  strategy_type: string;
+  count: number;
+  history: ParamHistoryEntry[];
+}
+
 // ── Walk-forward analysis (out-of-sample validation) ───────────────────────
 
 export interface WfaFold {

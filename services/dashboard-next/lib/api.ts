@@ -6,6 +6,7 @@ import type {
   StrategyProfile, BacktestResult, MonteCarloResult,
   GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle, OrderBook,
   ReadinessResult, PerformanceByStrategy, TcaReport, WalkForwardResult,
+  StrategyParamsResponse, ParamHistory,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
 import type { Role } from "@/lib/auth";
@@ -287,6 +288,18 @@ export const api = {
       venue?: string; spot_symbol?: string; perp_symbol?: string; interval?: string;
       days?: number; is_candles?: number; oos_candles?: number; step_candles?: number;
     }) => req<WalkForwardResult>("POST", "/backtest/walk-forward/stat-arb", body),
+  },
+
+  // ── Parameter governance ─────────────────────────────────────────────────────
+  governance: {
+    getParams: (strategyType: string) =>
+      req<StrategyParamsResponse>("GET", `/api/v1/governance/strategy/${strategyType}`),
+    history: (strategyType: string, limit = 20) =>
+      req<ParamHistory>("GET", `/api/v1/governance/strategy/${strategyType}/history?limit=${limit}`),
+    setParams: (strategyType: string, body: { params: Record<string, unknown>; source?: string; reason?: string }) =>
+      req<Record<string, unknown>>("PUT", `/api/v1/governance/strategy/${strategyType}`, body),
+    checkDrift: (strategyType: string, referenceParams: Record<string, unknown>) =>
+      req<Record<string, unknown>>("POST", `/api/v1/governance/strategy/${strategyType}/check-drift`, { reference_params: referenceParams }),
   },
 
   // ── RAG ────────────────────────────────────────────────────────────────────

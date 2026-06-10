@@ -87,7 +87,11 @@ The analytics to *judge* the run are built (the 4-week clock itself is operation
   optimise-on-IS / test-on-OOS, walk-forward-efficiency + parameter-stability +
   robust/marginal/overfit verdict, with a Backtest-page panel. vectorbt stayed
   deferred (see ADR 0001) — its heavy dep wasn't needed for the value.
-- Parameter governance: version + audit strategy params; no silent prod changes.
+- ~~Parameter governance: version + audit strategy params; no silent prod changes.~~
+  **DONE** — `mezna_shared.param_governance` (canonical hash, diff, drift) + gateway
+  `/api/v1/governance/strategy/*` (get / set / history / check-drift): current params
+  in strategy_configs, append-only versioned history in audit_log attributed to the
+  verified operator. Strategies-page governance panel. See docs/parameter-governance.md.
 - Regime detector validation; `riskfolio-lib` for multi-strategy capital allocation;
   `arch`/GARCH for vol-aware sizing.
 - Activate the RAG service (Qdrant reserved) for strategy-knowledge grounding.
