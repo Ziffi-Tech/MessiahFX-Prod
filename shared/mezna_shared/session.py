@@ -66,9 +66,13 @@ def verify_session_token(token: str, secret: str) -> dict | None:
     if not isinstance(payload, dict):
         return None
 
-    exp = payload.get("exp")
-    if not isinstance(exp, (int, float)) or exp * 1000 < time.time() * 1000:
-        return None
-    if payload.get("role") not in _VALID_ROLES:
-        return None
-    return payload
+sub = payload.get("sub")
+iat = payload.get("iat")
+exp = payload.get("exp")
+if not isinstance(sub, str) or not sub or not isinstance(iat, (int, float)) or not isinstance(exp, (int, float)):
+    return None
+if exp * 1000 < time.time() * 1000:
+    return None
+if payload.get("role") not in _VALID_ROLES:
+    return None
+return payload
