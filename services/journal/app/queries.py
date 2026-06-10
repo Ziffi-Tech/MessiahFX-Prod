@@ -398,6 +398,24 @@ def cost_bps(cost: float, notional: float) -> float:
     return round(cost / notional * 10_000.0, 4) if notional > 0 else 0.0
 
 
+def align_daily_returns(rows: list[dict]) -> dict[str, list[float]]:
+    """
+    Build DATE-ALIGNED per-strategy daily realised-P&L series from daily_pnl rows.
+
+    All strategies share one sorted date axis; a strategy that didn't trade on a
+    date gets 0 there — so the series are equal-length and comparable for the
+    capital-allocation covariance.
+    """
+    dates = sorted({str(r.get("trade_date")) for r in rows})
+    index = {d: i for i, d in enumerate(dates)}
+    series: dict[str, list[float]] = {}
+    for r in rows:
+        strat = r.get("strategy_type") or "unknown"
+        series.setdefault(strat, [0.0] * len(dates))
+        series[strat][index[str(r.get("trade_date"))]] += float(r.get("realized_pnl", 0) or 0)
+    return series
+
+
 _PERF_BY_STRATEGY = text("""
     SELECT
         strategy_type,

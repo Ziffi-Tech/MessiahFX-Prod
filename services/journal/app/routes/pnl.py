@@ -134,6 +134,22 @@ async def pnl_by_strategy(
     return JSONResponse(content=data)
 
 
+@router.get("/allocation")
+async def pnl_allocation(
+    request: Request,
+    days: int = Query(30, ge=1, le=365),
+    method: str = Query("risk_parity", description="equal_weight | inverse_vol | risk_parity | max_sharpe"),
+    capital: float = Query(0.0, ge=0, description="Total capital to split across strategies"),
+) -> JSONResponse:
+    """Capital allocation across strategies from their date-aligned return series."""
+    from mezna_shared.allocation import allocate
+
+    rows = await queries.daily_pnl(request.app.state.db_engine, days=days)
+    series = queries.align_daily_returns(rows)
+    result = allocate(series, method=method, capital=capital)
+    return JSONResponse(content={"days": days, **result})
+
+
 @router.get("/tca")
 async def pnl_tca(
     request: Request,

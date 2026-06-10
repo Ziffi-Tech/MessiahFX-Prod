@@ -6,7 +6,7 @@ import type {
   StrategyProfile, BacktestResult, MonteCarloResult,
   GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle, OrderBook,
   ReadinessResult, PerformanceByStrategy, TcaReport, WalkForwardResult,
-  StrategyParamsResponse, ParamHistory,
+  StrategyParamsResponse, ParamHistory, AllocationResult,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
 import type { Role } from "@/lib/auth";
@@ -189,6 +189,11 @@ export const api = {
         "GET", `/journal/opportunities?limit=${limit}`
       ),
     readiness: () => req<ReadinessResult>("GET", "/journal/readiness"),
+    allocation: (days = 30, method = "risk_parity", capital = 0) =>
+      req<AllocationResult>(
+        "GET",
+        `/journal/pnl/allocation?days=${days}&method=${encodeURIComponent(method)}&capital=${capital}`,
+      ),
     byStrategy: (days = 30) =>
       req<PerformanceByStrategy>("GET", `/journal/pnl/by-strategy?days=${days}`),
     tca: (days = 30) =>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { ReadinessPanel } from "@/components/trading/readiness-panel";
+import { AllocationPanel } from "@/components/trading/allocation-panel";
 import type { StrategyPerformance, TcaRow } from "@/types/api";
 
 const WINDOWS = [7, 30, 90] as const;
@@ -114,6 +115,9 @@ export default function PerformancePage() {
           </div>
         )}
       </div>
+
+      {/* Capital allocation across strategies */}
+      <AllocationPanel days={days} />
 
       {/* Transaction-cost analysis */}
       <div className="panel">

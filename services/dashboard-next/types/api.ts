@@ -259,6 +259,27 @@ export interface StrategyOverview {
   timestamp: string;
 }
 
+// ── Capital allocation ──────────────────────────────────────────────────────
+
+export interface AllocationStrategy {
+  strategy_type: string;
+  weight: number;
+  capital: number;
+  daily_mean_pnl: number;
+  daily_vol: number;
+  risk_contribution: number | null;
+  usable: boolean;
+}
+
+export interface AllocationResult {
+  days: number;
+  method: string;
+  capital: number;
+  usable_count: number;
+  weights: Record<string, number>;
+  strategies: AllocationStrategy[];
+}
+
 // ── Parameter governance ────────────────────────────────────────────────────
 
 export interface StrategyParamsResponse {

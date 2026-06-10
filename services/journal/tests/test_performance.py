@@ -1,6 +1,6 @@
 """Tests for the pure performance/TCA helpers in app.queries."""
 
-from app.queries import curve_performance, cost_bps, _daily_series, _sortino
+from app.queries import curve_performance, cost_bps, _daily_series, _sortino, align_daily_returns
 
 
 def _rows(*pairs):
@@ -42,3 +42,24 @@ def test_cost_bps():
     assert cost_bps(10.0, 100_000.0) == 1.0   # $10 fee on $100k = 1 bp
     assert cost_bps(0.0, 100.0) == 0.0
     assert cost_bps(5.0, 0.0) == 0.0           # no notional → 0, not div-by-zero
+
+
+def test_align_daily_returns_fills_zero():
+    rows = [
+        {"trade_date": "d1", "strategy_type": "a", "realized_pnl": 10},
+        {"trade_date": "d2", "strategy_type": "a", "realized_pnl": -5},
+        {"trade_date": "d1", "strategy_type": "b", "realized_pnl": 3},
+        {"trade_date": "d3", "strategy_type": "b", "realized_pnl": 7},
+    ]
+    s = align_daily_returns(rows)
+    # date axis = d1,d2,d3; non-trading days filled with 0
+    assert s["a"] == [10.0, -5.0, 0.0]
+    assert s["b"] == [3.0, 0.0, 7.0]
+
+
+def test_align_daily_returns_sums_same_date():
+    rows = [
+        {"trade_date": "d1", "strategy_type": "a", "realized_pnl": 4},
+        {"trade_date": "d1", "strategy_type": "a", "realized_pnl": 6},
+    ]
+    assert align_daily_returns(rows)["a"] == [10.0]

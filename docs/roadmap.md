@@ -92,8 +92,13 @@ The analytics to *judge* the run are built (the 4-week clock itself is operation
   `/api/v1/governance/strategy/*` (get / set / history / check-drift): current params
   in strategy_configs, append-only versioned history in audit_log attributed to the
   verified operator. Strategies-page governance panel. See docs/parameter-governance.md.
-- Regime detector validation; `riskfolio-lib` for multi-strategy capital allocation;
-  `arch`/GARCH for vol-aware sizing.
+- ~~`riskfolio-lib` for multi-strategy capital allocation~~ **DONE** —
+  `mezna_shared.allocation` (pure Python: equal / inverse-vol / risk-parity (ERC) /
+  max-Sharpe tangency, with covariance + Gauss-Jordan inverse) + journal
+  `GET /pnl/allocation` (date-aligned per-strategy returns → weights + capital split)
+  + Allocation panel on the Performance page. riskfolio-lib stayed out (no heavy dep).
+  See docs/capital-allocation.md.
+- Regime detector validation; `arch`/GARCH for vol-aware sizing.
 - Activate the RAG service (Qdrant reserved) for strategy-knowledge grounding.
 
 ## Phase 4 — Controlled live
