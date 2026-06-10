@@ -157,6 +157,30 @@ async def activate_cooldown(
     )
 
 
+_OPEN_EXPOSURE = text("""
+    SELECT strategy_type, COALESCE(SUM(ABS(net_qty * avg_price)), 0) AS exposure
+    FROM positions
+    WHERE status = 'open' AND paper_mode = :paper_mode
+    GROUP BY strategy_type
+""")
+
+
+async def get_open_exposure(db_engine: AsyncEngine, paper_mode: bool) -> tuple[float, dict[str, float]]:
+    """
+    Current OPEN notional exposure from the positions table, for the capital-control
+    caps. Returns (gross_usd, {strategy_type: exposure_usd}). On any error returns
+    (0, {}) — the caller decides; the caps only matter when configured.
+    """
+    try:
+        async with get_async_session(db_engine) as session:
+            rows = (await session.execute(_OPEN_EXPOSURE, {"paper_mode": paper_mode})).fetchall()
+    except Exception as exc:
+        log.error("risk.exposure_query_failed", error=str(exc))
+        return 0.0, {}
+    by_strategy = {r.strategy_type: float(r.exposure or 0) for r in rows}
+    return sum(by_strategy.values()), by_strategy
+
+
 async def write_audit_log(
     db_engine: AsyncEngine,
     event_type: str,

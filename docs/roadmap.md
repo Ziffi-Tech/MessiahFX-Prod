@@ -110,10 +110,16 @@ The analytics to *judge* the run are built (the 4-week clock itself is operation
 
 ## Phase 4 — Controlled live
 
-- Provision exchange keys with **trade-only** scope (no withdrawal).
-- Capital controls: per-strategy + global notional caps, daily loss limit auto-halt.
-- Gradual rollout: one strategy, small notional → widen on evidence.
-- Incident runbooks + scheduled kill-switch drills in prod.
+- ~~Capital controls: per-strategy + global notional caps, daily loss limit auto-halt.~~
+  **DONE (code)** — risk gate now enforces `RISK_MAX_GROSS_EXPOSURE_USD`,
+  `RISK_MAX_STRATEGY_EXPOSURE_USD` (open-notional caps, queried from positions at
+  decision time) and `RISK_DAILY_LOSS_LIMIT_USD` (absolute daily-loss **auto-halt**),
+  all default OFF. 6 tests. See docs/capital-controls.md.
+- ~~Incident runbook + kill-switch drill~~ **DONE** — docs/incident-runbook.md
+  (halt-first triage + a monthly kill-switch drill).
+- **Operational (you):** provision exchange keys with **trade-only** scope (no
+  withdrawal); gradual rollout — one strategy, small per-strategy cap → widen on
+  evidence; run the kill-switch drill in prod before the first live session.
 
 ## Phase 5 — Product polish & scale
 

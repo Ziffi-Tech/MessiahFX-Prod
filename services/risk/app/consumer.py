@@ -106,6 +106,13 @@ async def _process(
     strategy_state = await redis.hgetall(RedisKeys.strategy_state(strategy_type))
     on_cooldown = bool(await redis.exists(RedisKeys.cooldown(strategy_type)))
 
+    # ── Capital-control exposure (Phase 4) — query only when caps are configured ─
+    gross_exposure = 0.0
+    strategy_exposure = 0.0
+    if settings.exposure_caps_enabled:
+        gross_exposure, by_strategy = await state.get_open_exposure(db_engine, settings.is_paper)
+        strategy_exposure = by_strategy.get(strategy_type, 0.0)
+
     # ── Run checks ─────────────────────────────────────────────────────────────
     result = run_checks(
         risk_hash=risk_hash,
@@ -114,6 +121,9 @@ async def _process(
         strategy_state=strategy_state,
         on_cooldown=on_cooldown,
         settings=settings,
+        gross_exposure_usd=gross_exposure,
+        strategy_exposure_usd=strategy_exposure,
+        new_notional_usd=settings.position_usd,
     )
 
     checked_at = datetime.now(timezone.utc).isoformat()
