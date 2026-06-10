@@ -89,16 +89,16 @@ def compute_position_drift(
         our_px = _f(o.get("avg_price"))
         exch_px = _f(t.get("avg_price"))
         qty_diff = our_qty - exch_qty
-        price_diff_bps = ((our_px - exch_px) / exch_px * 10_000.0) if exch_px else 0.0
+price_diff_bps = ((our_px - exch_px) / exch_px * 10_000.0) if exch_px else None
 
-        if abs(qty_diff) > qty_tolerance or abs(price_diff_bps) > price_tolerance_bps:
-            drifted += 1
-            drifts.append({
-                "venue": venue, "symbol": symbol, "type": "mismatch",
-                "our_qty": our_qty, "exch_qty": exch_qty, "qty_diff": qty_diff,
-                "our_avg_price": our_px, "exch_avg_price": exch_px,
-                "price_diff_bps": round(price_diff_bps, 4),
-            })
+if abs(qty_diff) > qty_tolerance or (price_diff_bps is not None and abs(price_diff_bps) > price_tolerance_bps):
+    drifted += 1
+    drifts.append({
+        "venue": venue, "symbol": symbol, "type": "mismatch",
+        "our_qty": our_qty, "exch_qty": exch_qty, "qty_diff": qty_diff,
+        "our_avg_price": our_px, "exch_avg_price": exch_px,
+        "price_diff_bps": round(price_diff_bps, 4) if price_diff_bps is not None else None,
+    })
 
     return {
         "ok": drifted == 0,
