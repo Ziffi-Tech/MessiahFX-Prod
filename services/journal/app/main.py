@@ -37,7 +37,7 @@ from mezna_shared.db import get_engine, check_db_connection, dispose_engine
 from mezna_shared.redis_client import get_redis, close_redis
 
 from .config import settings
-from .routes import health, trades, opportunities, pnl, audit
+from .routes import health, trades, opportunities, pnl, audit, readiness
 from . import reconciler
 
 setup_logging(
@@ -123,6 +123,7 @@ app.include_router(trades.router, prefix="/trades", tags=["trades"])
 app.include_router(opportunities.router, prefix="/opportunities", tags=["opportunities"])
 app.include_router(pnl.router, prefix="/pnl", tags=["pnl"])
 app.include_router(audit.router, prefix="/audit", tags=["audit"])
+app.include_router(readiness.router, tags=["readiness"])
 
 from mezna_shared.metrics import setup_metrics
 setup_metrics(app, service_name=settings.SERVICE_NAME)

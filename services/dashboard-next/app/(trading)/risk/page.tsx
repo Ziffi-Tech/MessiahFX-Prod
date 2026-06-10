@@ -2,6 +2,7 @@
 
 import { AlertOctagon, Power } from "lucide-react";
 import { useRiskState, useKillSwitch } from "@/lib/hooks";
+import { ReadinessPanel } from "@/components/trading/readiness-panel";
 
 function Gauge({ label, current, max, suffix = "", decimals = 0 }: {
   label: string; current: number; max: number; suffix?: string; decimals?: number;
@@ -162,6 +163,9 @@ export default function RiskPage() {
           ))}
         </div>
       </div>
+
+      {/* Go-live readiness gate */}
+      <ReadinessPanel />
     </div>
   );
 }

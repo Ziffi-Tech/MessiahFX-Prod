@@ -11,10 +11,11 @@ first-paint snapshot and a polling fallback for the SSE stream the gateway
 fans out. No DB access — pure Redis, one pipelined round-trip.
 """
 
+import json
 from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from mezna_shared.redis_client import RedisKeys
@@ -91,3 +92,32 @@ async def latest_ticks(request: Request) -> JSONResponse:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
     )
+
+
+@router.get("/orderbook/latest", summary="Latest L2 order-book snapshot for one symbol")
+async def latest_orderbook(
+    request: Request,
+    venue: str = Query(..., description="Venue, e.g. binance"),
+    symbol: str = Query(..., description="ccxt unified symbol, e.g. BTC/USDT"),
+) -> JSONResponse:
+    """
+    Return the most recent depth ladder (bids/asks) for one (venue, symbol),
+    populated by the order-book feed. 404 when the feed is disabled for this
+    symbol or the snapshot has expired (TTL = ORDERBOOK_TTL_SECONDS).
+    """
+    raw = await request.app.state.redis.get(RedisKeys.order_book(venue, symbol))
+    if not raw:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={
+                "status": "empty",
+                "detail": "No order book — enable it via ORDERBOOK_SYMBOLS or the snapshot expired",
+                "venue": venue,
+                "symbol": symbol,
+            },
+        )
+    try:
+        book = json.loads(raw)
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=status.HTTP_502_BAD_GATEWAY, content={"status": "error", "detail": "corrupt snapshot"})
+    return JSONResponse(content={"status": "ok", **book})

@@ -26,6 +26,31 @@ from mezna_shared.metrics import setup_metrics
 
 from .config import settings
 from .routes import health, signals, control, credentials, proxy, stream
+from .middleware import RateLimitMiddleware
+
+# Known dev-default secrets that must never run in production.
+_INSECURE_SESSION_SECRETS = {"", "mezna_dev_session_secret_change_me", "mezna-dev-secret-change-me"}
+
+
+def _check_production_security() -> None:
+    """Fail loud on insecure config in production; warn in development."""
+    prod = settings.is_production
+
+    if settings.SESSION_SECRET in _INSECURE_SESSION_SECRETS:
+        msg = "SESSION_SECRET is unset or a dev default — session auth is not secure"
+        if prod:
+            raise RuntimeError(f"Refusing to start in production: {msg}")
+        log.warning("security.weak_session_secret", detail=msg)
+
+    if prod:
+        if not settings.GATEWAY_REQUIRE_AUTH:
+            log.error("security.require_auth_off", detail="Set GATEWAY_REQUIRE_AUTH=true in production")
+        if not settings.credentials_enabled:
+            log.error("security.no_credential_key", detail="CREDENTIAL_ENCRYPTION_KEY unset")
+        if any("localhost" in o or "127.0.0.1" in o for o in settings.CORS_ORIGINS):
+            log.error("security.cors_localhost", detail="CORS_ORIGINS still allows localhost — lock to the prod origin")
+        if settings.DEBUG:
+            log.error("security.debug_on", detail="DEBUG is enabled in production")
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -61,6 +86,9 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.error("service.startup_failed", reason="redis unreachable", error=str(exc))
         raise RuntimeError("Cannot connect to Redis at startup") from exc
+
+    # Fail loud on insecure config in production (weak secret, auth off, open CORS).
+    _check_production_security()
 
     # Credential store — only initialise if encryption key is set
     if settings.credentials_enabled:
@@ -116,6 +144,15 @@ app.add_middleware(
     # Omitting them caused browser preflight (OPTIONS) to reject those calls.
     allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-API-Key"],
+)
+
+# Rate limiter — added last so it runs OUTERMOST (before routing). Pure ASGI, so
+# it does not buffer the SSE /stream response. Health/stream/metrics + OPTIONS exempt.
+app.add_middleware(
+    RateLimitMiddleware,
+    enabled=settings.RATE_LIMIT_ENABLED,
+    limit=settings.RATE_LIMIT_REQUESTS,
+    window=settings.RATE_LIMIT_WINDOW_SECONDS,
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────

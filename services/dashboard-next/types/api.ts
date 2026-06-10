@@ -259,6 +259,37 @@ export interface StrategyOverview {
   timestamp: string;
 }
 
+// ── Go-live readiness ──────────────────────────────────────────────────────
+
+export interface ReadinessCriterion {
+  name: string;
+  pass: boolean;
+  value: number;
+  threshold: number;
+  detail: string;
+}
+
+export interface ReadinessResult {
+  ready: boolean;
+  evaluated_at: string;
+  days_in_paper: number;
+  thresholds: { min_paper_days: number; min_trades: number };
+  criteria: ReadinessCriterion[];
+  advisory: ReadinessCriterion[];
+  summary: Record<string, number>;
+}
+
+// ── L2 order book (depth ladder / DOM) ─────────────────────────────────────
+
+export interface OrderBook {
+  status?: string;
+  venue: string;
+  symbol: string;
+  ts: string;
+  bids: [number, number][];   // [price, amount], price descending
+  asks: [number, number][];   // [price, amount], price ascending
+}
+
 // ── OHLCV candles (persisted bars → lightweight-charts) ────────────────────
 
 export interface OHLCVCandle {

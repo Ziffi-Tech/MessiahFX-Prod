@@ -100,6 +100,13 @@ class RedisKeys:
         clean_symbol = symbol.replace("/", "_").replace(":", "_")
         return f"tick:latest:{venue}:{clean_symbol}"
 
+    # String (JSON): latest L2 order-book snapshot per symbol (top-N levels).
+    # Written with a short TTL so a dead order-book feed's book disappears.
+    @staticmethod
+    def order_book(venue: str, symbol: str) -> str:
+        clean_symbol = symbol.replace("/", "_").replace(":", "_")
+        return f"orderbook:{venue}:{clean_symbol}"
+
     # Last heartbeat timestamp per feed
     @staticmethod
     def feed_heartbeat(venue: str) -> str:
@@ -114,8 +121,22 @@ class RedisKeys:
     # ── Execution queue (risk-approved signals ready for executor) ────────────
     SIGNALS_EXECUTION_QUEUE = "signals:execution_queue"
 
+    # String (JSON): recorded OrderResult per client_order_id, for idempotent
+    # replay — a redelivered leg reuses the stored result instead of resubmitting.
+    @staticmethod
+    def execution_result(client_order_id: str) -> str:
+        return f"execution:result:{client_order_id}"
+
     # ── Notification Queue ────────────────────────────────────────────────────
     NOTIFICATION_QUEUE = "notifications:queue"
+
+    # ── Session revocation (dashboard auth) ───────────────────────────────────
+    # Epoch (seconds): any session token with iat < this value is revoked.
+    SESSION_REVOKE_ALL = "session:revoke:all"
+
+    @staticmethod
+    def session_revoke_user(sub: str) -> str:
+        return f"session:revoke:user:{sub}"
 
 
 class StreamNames:

@@ -24,6 +24,7 @@ exchanges ──CCXT Pro──► market-data ──► Redis (tick:latest:*, si
 | Service | Endpoint | Purpose |
 |---|---|---|
 | market-data | `GET /ticks/latest[?venues=]` | Snapshot of `tick:latest:*` (first paint + polling fallback) |
+| market-data | `GET /orderbook/latest?venue=&symbol=` | L2 depth snapshot for the DOM panel (feed gated by `ORDERBOOK_SYMBOLS`) |
 | gateway | `GET /stream` | SSE: `ticks` / `risk` / `signals` frames, ~1s cadence, auto-reconnect |
 | journal | `GET /pnl/summary` | Now returns `win_rate`, `winning/losing_trades`, `average_win/loss`, `profit_factor`, `max_drawdown_pct`, `sharpe_ratio` |
 | backtest | `GET /ohlcv` | Persisted candles (`ohlcv_bars`) — feeds the candlestick chart |
@@ -38,6 +39,8 @@ upgrade for sub-second order flow can come later.
 - **Live market monitor** (PriceGrid): real bid/ask/mid + spread + tick direction.
 - **Candlestick chart** (PriceChart): lightweight-charts v5 over persisted OHLCV,
   symbol selector, 1m/5m/15m/1h, live last-bar overlay from the SSE mid.
+- **L2 depth ladder** (DepthLadder): real order book (bids/asks + cumulative depth
+  bars + spread) for symbols in `ORDERBOOK_SYMBOLS`, polled 1s.
 - **Global controls** (BotControls, topbar): START (`bot/start`, paper) / STOP
   (`bot/stop`) / KILL (`control/kill`) + PAPER/LIVE/HALTED badge + stream health.
 - **⌘K command palette**: keyboard-first navigation + bot actions.
@@ -86,9 +89,15 @@ verifies the signature + expiry on every request.
 
 RBAC is enforced server-side in the gateway proxy route (viewer → 403 on any
 non-GET), and mirrored in the UI (BotControls + command palette hide write
-actions for viewers). After auth, the proxy forwards `X-Mezna-User` /
-`X-Mezna-Role`; the gateway control plane attributes kill-switch / start / stop /
-toggle audit records to the **real user** instead of the literal `"dashboard"`.
+actions for viewers). After auth, the proxy forwards the signed token
+(`X-Mezna-Token`) plus `X-Mezna-User` / `X-Mezna-Role`.
+
+**Defense in depth:** the FastAPI gateway *verifies* `X-Mezna-Token` itself
+(HS256 with the shared `SESSION_SECRET`) + checks revocation, and uses that
+verified identity to attribute control actions and authorise admin-only ones
+(e.g. session revocation) — the spoofable headers are only an untrusted fallback.
+Set `GATEWAY_REQUIRE_AUTH=true` to reject any control-plane write lacking a valid
+token. The gateway's `SESSION_SECRET` **must match** the dashboard's.
 
 ### Setup
 
@@ -113,7 +122,8 @@ working — set the roster to disable it.
 | Var | Where | Notes |
 |---|---|---|
 | `GATEWAY_URL` | dashboard-next | In-container: `http://gateway:8000`. All `/api/gateway/*` routes here by default. |
-| `SESSION_SECRET` | dashboard-next | HMAC key for session tokens. **Required in prod.** |
+| `SESSION_SECRET` | dashboard-next **+ gateway** | HMAC key for session tokens. **Required in prod**; the two values must match. |
+| `GATEWAY_REQUIRE_AUTH` | gateway | `true` rejects control-plane writes without a verified token. Default false. |
 | `DASHBOARD_USERS` | dashboard-next | JSON roster (see above). Empty → legacy single-password mode. |
 | `DASHBOARD_PASSWORD` | dashboard-next | Legacy fallback password (admin) when no roster. |
 | `NEXT_PUBLIC_USE_SERVICE_ROUTING` | dashboard-next (dev only) | `true` fans out to individual service ports for isolated debugging; leave unset in prod. |
@@ -121,9 +131,4 @@ working — set the roster to disable it.
 
 ## Known gaps / next
 
-- Risk gauges + signal feed still poll (5–15s); they can move onto the SSE `risk`
-  / `signals` frames already being broadcast.
-- No L2 depth/order-book panel (needs a CCXT Pro order-book feed).
-- Sessions are stateless (no server-side revocation list); rotate `SESSION_SECRET`
-  to invalidate all sessions. Per-user revocation would need a store.
 - Go-live gate unchanged: 4+ weeks clean paper + kill switch tested in prod.

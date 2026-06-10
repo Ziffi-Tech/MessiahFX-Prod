@@ -1,17 +1,37 @@
 "use client";
 
 import { useState } from "react";
-import { Key, Eye, EyeOff, Shield } from "lucide-react";
+import { Key, Eye, EyeOff, Shield, LogOut } from "lucide-react";
+import { useAuth } from "@/lib/hooks";
+import { api } from "@/lib/api";
 
 export default function SettingsPage() {
+  const { data: auth } = useAuth();
   const [showPass, setShowPass] = useState(false);
   const [newPass, setNewPass] = useState("");
   const [saved, setSaved] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [revoked, setRevoked] = useState(false);
 
   const savePassword = async () => {
     // Password is managed via .env — show instructions
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
+  };
+
+  const signOutAll = async () => {
+    if (!confirm("Sign out ALL operators? Everyone (including you) must log in again.")) return;
+    setRevoking(true);
+    try {
+      await api.control.revokeSessions("all");
+      setRevoked(true);
+      // Our own token is now revoked too — log out and return to login.
+      await fetch("/api/auth", { method: "DELETE" });
+      setTimeout(() => { window.location.href = "/login"; }, 800);
+    } catch {
+      setRevoking(false);
+      alert("Failed to revoke sessions");
+    }
   };
 
   return (
@@ -85,6 +105,29 @@ export default function SettingsPage() {
           {saved ? "✓ Set DASHBOARD_PASSWORD in .env to change" : "How to change password"}
         </button>
       </div>
+
+      {/* Session management (admin only) */}
+      {auth?.role === "admin" && (
+        <div className="panel p-5 space-y-4">
+          <div className="flex items-center gap-2">
+            <LogOut size={14} style={{ color: "var(--red)" }} />
+            <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>Session Management</span>
+          </div>
+          <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+            Revoke all active sessions immediately (e.g. after a leaked credential).
+            Everyone — including you — will need to sign in again. Takes effect within ~15s.
+          </p>
+          <button
+            type="button"
+            onClick={signOutAll}
+            disabled={revoking}
+            className="px-4 py-2 rounded text-xs font-semibold disabled:opacity-50"
+            style={{ background: "var(--red-dim)", color: "var(--red)", border: "1px solid rgba(255,61,87,0.3)" }}
+          >
+            {revoked ? "✓ Sessions revoked — redirecting…" : revoking ? "Revoking…" : "Sign out all sessions"}
+          </button>
+        </div>
+      )}
 
       {/* Service URLs */}
       <div className="panel p-5 space-y-3">

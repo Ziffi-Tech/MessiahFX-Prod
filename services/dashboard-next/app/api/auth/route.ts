@@ -5,6 +5,7 @@ import {
   signSession, verifySession, sessionSecret,
   SESSION_COOKIE, SESSION_TTL_SECONDS,
 } from "@/lib/auth";
+import { isRevoked } from "@/lib/revocation";
 
 // POST /api/auth — login (username + password → signed session cookie)
 export async function POST(req: Request) {
@@ -37,7 +38,7 @@ export async function GET() {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   const session = token ? await verifySession(token, sessionSecret()) : null;
-  if (!session) {
+  if (!session || (await isRevoked(session.sub, session.iat))) {
     return NextResponse.json({ authenticated: false }, { status: 401 });
   }
   return NextResponse.json({ authenticated: true, user: session.sub, role: session.role });

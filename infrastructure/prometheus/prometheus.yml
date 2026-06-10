@@ -16,11 +16,16 @@ global:
     project:     "mezna-quantfx"
 
 # ── Alerting ──────────────────────────────────────────────────────────────────
-# Add alertmanager here when you add alert rules
+# Alert RULES load below (rule_files). They fire in the Prometheus UI; the services
+# also push feed-down/drawdown notifications to the notifications queue. To route
+# Prometheus alerts to Telegram/Discord, run an alertmanager and uncomment:
 # alerting:
 #   alertmanagers:
 #     - static_configs:
 #         - targets: ['alertmanager:9093']
+
+rule_files:
+  - "alerts.yml"
 
 # ── Scrape configs ────────────────────────────────────────────────────────────
 scrape_configs:

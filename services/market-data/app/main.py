@@ -30,8 +30,9 @@ from mezna_shared.redis_client import get_redis, close_redis
 
 from .config import settings
 from .routes import health, backfill, ticks
-from .feeds import binance_feed, oanda_feed, bybit_feed, okx_feed, kraken_feed
+from .feeds import binance_feed, oanda_feed, bybit_feed, okx_feed, kraken_feed, orderbook_feed
 from . import bar_writer
+from . import metrics_exporter
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -127,6 +128,22 @@ async def lifespan(app: FastAPI):
     )
     bar_writer_task.add_done_callback(_on_feed_task_done)
     _feed_tasks.append(bar_writer_task)
+
+    # L2 order-book feed — depth ladder for the terminal DOM panel (default off).
+    orderbook_task = asyncio.create_task(
+        orderbook_feed.run(settings, app.state.redis),
+        name="orderbook_feed",
+    )
+    orderbook_task.add_done_callback(_on_feed_task_done)
+    _feed_tasks.append(orderbook_task)
+
+    # Feed-health metrics exporter — mezna_feed_up{venue} gauge + down alerts.
+    metrics_task = asyncio.create_task(
+        metrics_exporter.run(settings, app.state.redis),
+        name="metrics_exporter",
+    )
+    metrics_task.add_done_callback(_on_feed_task_done)
+    _feed_tasks.append(metrics_task)
 
     log.info(
         "service.ready",

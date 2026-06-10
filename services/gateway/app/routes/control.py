@@ -24,6 +24,8 @@ from mezna_shared.regime_map import ALL_STRATEGIES
 from mezna_shared.schemas.risk import KillSwitchRequest, KillSwitchResetRequest, StrategyToggleRequest
 from mezna_shared.db import get_async_session
 
+from ..auth import resolve_identity, require_verified, require_admin
+
 log = structlog.get_logger()
 router = APIRouter()
 
@@ -32,17 +34,21 @@ router = APIRouter()
 _ALL_STRATEGIES: tuple[str, ...] = tuple(sorted(ALL_STRATEGIES))
 
 
-def _actor(request: Request, fallback: str) -> str:
+async def _actor(request: Request, fallback: str) -> str:
     """
     Resolve the operator behind a control action for the audit trail.
 
-    The dashboard proxy verifies the session and forwards X-Mezna-User after
-    auth, so safety-critical actions are attributed to the real user instead of
-    a literal "dashboard". Falls back to the request-body value for non-dashboard
-    callers (scripts, direct API).
+    Prefers the cryptographically VERIFIED token identity (defense in depth); if
+    no valid token is present, falls back to the (untrusted) X-Mezna-User header,
+    then the request-body value. Also enforces GATEWAY_REQUIRE_AUTH: when on, a
+    write with no verified token is rejected 401 (via require_verified).
     """
-    user = request.headers.get("x-mezna-user")
-    return user.strip() if user and user.strip() else fallback
+    identity = await resolve_identity(request)
+    require_verified(identity)
+    if identity.verified:
+        return identity.user
+    header_user = request.headers.get("x-mezna-user")
+    return header_user.strip() if header_user and header_user.strip() else fallback
 
 
 @router.get("/status", summary="Get current system control state")
@@ -91,7 +97,7 @@ async def activate_kill_switch(
     """
     redis = request.app.state.redis
     activated_at = datetime.now(timezone.utc)
-    actor = _actor(request, body.activated_by)
+    actor = await _actor(request, body.activated_by)
 
     # Set halt flag in Redis — immediate effect, fastest possible read
     await redis.set(RedisKeys.HALT, "1")
@@ -168,7 +174,7 @@ async def reset_kill_switch(
 
     redis = request.app.state.redis
     reset_at = datetime.now(timezone.utc)
-    actor = _actor(request, body.reset_by)
+    actor = await _actor(request, body.reset_by)
 
     await redis.set(RedisKeys.HALT, "0")
     await redis.hset(
@@ -228,7 +234,7 @@ async def toggle_strategy(
     """
     redis = request.app.state.redis
     toggled_at = datetime.now(timezone.utc)
-    actor = _actor(request, "dashboard")
+    actor = await _actor(request, "dashboard")
 
     state_update: dict[str, str] = {
         "enabled": "1" if body.enabled else "0",
@@ -322,7 +328,7 @@ async def bot_start(
     """
     redis = request.app.state.redis
     started_at = datetime.now(timezone.utc)
-    actor = _actor(request, body.started_by)
+    actor = await _actor(request, body.started_by)
     paper_flag = "1" if body.paper_mode else "0"
     mode_label = "paper" if body.paper_mode else "LIVE"
 
@@ -402,7 +408,7 @@ async def bot_stop(
     """
     redis = request.app.state.redis
     stopped_at = datetime.now(timezone.utc)
-    actor = _actor(request, body.stopped_by)
+    actor = await _actor(request, body.stopped_by)
 
     # 1. Activate halt
     await redis.set(RedisKeys.HALT, "1")
@@ -466,3 +472,70 @@ async def bot_stop(
         "stopped_at": stopped_at.isoformat(),
         "message": "Bot stopped. Kill switch active. Open positions NOT automatically closed.",
     }
+
+
+# ── Session revocation ─────────────────────────────────────────────────────────
+# The dashboard issues stateless signed-session tokens. To revoke without waiting
+# for expiry, we store an epoch in Redis; the dashboard proxy treats any token with
+# iat < epoch as invalid. "all" bumps the global epoch; "user" bumps one operator.
+
+
+class RevokeSessionsRequest(BaseModel):
+    scope: str = "all"          # "all" | "user"
+    user: str | None = None     # required when scope == "user"
+
+
+@router.get("/revocations", summary="Current session-revocation epochs (read by the dashboard proxy)")
+async def get_revocations(request: Request) -> dict:
+    """Return the global + per-user revocation epochs (seconds)."""
+    redis = request.app.state.redis
+    all_epoch = await redis.get(RedisKeys.SESSION_REVOKE_ALL)
+    users: dict[str, int] = {}
+    async for key in redis.scan_iter(match="session:revoke:user:*", count=200):
+        sub = key.split(":")[-1]
+        val = await redis.get(key)
+        if val:
+            try:
+                users[sub] = int(val)
+            except (TypeError, ValueError):
+                pass
+    return {"all": int(all_epoch) if all_epoch else 0, "users": users}
+
+
+@router.post("/revoke-sessions", summary="Revoke sessions (admin) — sign out all or one operator")
+async def revoke_sessions(request: Request, body: RevokeSessionsRequest) -> dict:
+    """
+    Bump a revocation epoch so existing tokens stop being accepted. Requires a
+    VERIFIED admin token (the dashboard proxy forwards it as X-Mezna-Token) — the
+    spoofable X-Mezna-Role header is no longer trusted for this.
+    """
+    identity = await resolve_identity(request)
+    require_admin(identity)
+
+    redis = request.app.state.redis
+    now = int(datetime.now(timezone.utc).timestamp())
+    actor = identity.user
+
+    if body.scope == "user":
+        if not body.user:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="user required for scope=user")
+        await redis.set(RedisKeys.session_revoke_user(body.user), now)
+        target = f"user:{body.user}"
+    else:
+        await redis.set(RedisKeys.SESSION_REVOKE_ALL, now)
+        target = "all"
+
+    log.warning("sessions.revoked", target=target, by=actor)
+    async with get_async_session(request.app.state.db_engine) as session:
+        await session.execute(
+            text("""
+                INSERT INTO audit_log (event_type, service, payload, metadata, created_at)
+                VALUES ('sessions.revoked', 'gateway', :payload::jsonb, '{}'::jsonb, :created_at)
+            """),
+            {
+                "payload": json.dumps({"target": target, "by": actor}),
+                "created_at": datetime.now(timezone.utc),
+            },
+        )
+
+    return {"revoked": target, "epoch": now, "by": actor}

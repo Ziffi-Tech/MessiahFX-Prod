@@ -4,7 +4,8 @@ import type {
   Trade, PnLSummary, Opportunity,
   StrategyConfig, RiskState, RagQuery, RagResponse,
   StrategyProfile, BacktestResult, MonteCarloResult,
-  GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle,
+  GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle, OrderBook,
+  ReadinessResult,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
 import type { Role } from "@/lib/auth";
@@ -133,6 +134,12 @@ export const api = {
         count: number; candles: OHLCVCandle[];
       }>("GET", `/backtest/ohlcv${q ? `?${q}` : ""}`);
     },
+    // L2 order book (depth ladder). 404 when ORDERBOOK_SYMBOLS excludes this symbol.
+    orderbook: (venue: string, symbol: string) =>
+      req<OrderBook>(
+        "GET",
+        `/market-data/orderbook/latest?venue=${encodeURIComponent(venue)}&symbol=${encodeURIComponent(symbol)}`,
+      ),
   },
 
   // ── Auth (not under the gateway proxy) ───────────────────────────────────────
@@ -155,6 +162,9 @@ export const api = {
       req<Record<string, unknown>>("POST", "/api/v1/control/bot/stop", {
         stopped_by: "dashboard", reason,
       }),
+    // Revoke sessions (admin). scope "all" signs everyone out; "user" one operator.
+    revokeSessions: (scope: "all" | "user", user?: string) =>
+      req<Record<string, unknown>>("POST", "/api/v1/control/revoke-sessions", { scope, user }),
   },
 
   // ── Journal ────────────────────────────────────────────────────────────────
@@ -177,6 +187,7 @@ export const api = {
       req<{ opportunities: Opportunity[] }>(
         "GET", `/journal/opportunities?limit=${limit}`
       ),
+    readiness: () => req<ReadinessResult>("GET", "/journal/readiness"),
   },
 
   // ── Strategies ─────────────────────────────────────────────────────────────

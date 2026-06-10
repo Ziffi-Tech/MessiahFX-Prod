@@ -113,6 +113,11 @@ services:
       SERVICE_PORT: "8000"
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-mezna}:${POSTGRES_PASSWORD:-mezna_dev_secret}@postgres:5432/${POSTGRES_DB:-mezna_trading}
       REDIS_URL: redis://redis:6379/0
+      # Must match the dashboard's SESSION_SECRET so the gateway can verify tokens.
+      SESSION_SECRET: ${SESSION_SECRET:-mezna_dev_session_secret_change_me}
+      GATEWAY_REQUIRE_AUTH: ${GATEWAY_REQUIRE_AUTH:-false}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
     volumes:
       - ./services/gateway/app:/app/app  # hot-reload in dev
     ports:
@@ -511,6 +516,7 @@ services:
       - "--web.enable-lifecycle"
     volumes:
       - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "127.0.0.1:9090:9090"

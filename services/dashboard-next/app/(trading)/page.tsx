@@ -7,6 +7,7 @@ import { RegimeBadge }     from "@/components/trading/regime-badge";
 import { RiskMeterCompact } from "@/components/trading/risk-meter-compact";
 import { PriceGrid }       from "@/components/trading/price-grid";
 import { PriceChart }      from "@/components/trading/price-chart";
+import { DepthLadder }     from "@/components/trading/depth-ladder";
 import { AiDigest }        from "@/components/trading/ai-digest";
 import { StrategyHealth }  from "@/components/trading/strategy-health";
 import { api }             from "@/lib/api";
@@ -84,6 +85,9 @@ export default function DashboardPage() {
         </div>
         <div className="space-y-4">
           <RiskMeterCompact />
+          <Suspense fallback={<PanelSkeleton h={48} />}>
+            <DepthLadder />
+          </Suspense>
           <Suspense fallback={<PanelSkeleton h={32} />}>
             <AiDigest />
           </Suspense>

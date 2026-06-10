@@ -19,7 +19,7 @@ class OrderRequest:
     Normalised order ready for execution.
     Built from the opportunity payload by the consumer before routing to an adapter.
     """
-    client_order_id: str       # UUID4 — idempotency key, unique constraint in DB
+    client_order_id: str       # deterministic per leg (mezna_shared.order_ids) — idempotency key, unique in DB
     venue: str                 # "binance" | "oanda"
     symbol: str                # Exchange-native symbol ("BTC/USDT", "EUR_USD")
     side: str                  # "buy" | "sell"
