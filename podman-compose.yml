@@ -489,7 +489,8 @@ services:
     networks:
       - mezna-net
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8008/health/live"]
+      # The backtest image (unlike its siblings) ships no curl — probe with python.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8008/health/live', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -541,12 +542,8 @@ services:
       - "127.0.0.1:3100:3100"
     networks:
       - mezna-net
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+    # No healthcheck: the loki image is distroless (no wget/curl/sh), so an
+    # in-container HTTP probe is impossible. Dependents wait on service_started.
 
   promtail:
     image: grafana/promtail:latest
@@ -562,7 +559,7 @@ services:
       - ${PODMAN_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
     depends_on:
       loki:
-        condition: service_healthy
+        condition: service_started
     networks:
       - mezna-net
 
@@ -581,12 +578,13 @@ services:
       - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infrastructure/grafana/dashboards:/etc/grafana/dashboards:ro
     ports:
-      - "127.0.0.1:3000:3000"
+      # 3002 on the host (3000 is taken by the Next.js terminal / dashboard).
+      - "127.0.0.1:3002:3000"
     depends_on:
       prometheus:
         condition: service_healthy
       loki:
-        condition: service_healthy
+        condition: service_started
     networks:
       - mezna-net
     healthcheck:
@@ -611,7 +609,8 @@ services:
     networks:
       - mezna-net
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:6333/readyz"]
+      # The qdrant image has no curl/wget; use a bash /dev/tcp probe (bash is present).
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
       interval: 15s
       timeout: 5s
       retries: 5

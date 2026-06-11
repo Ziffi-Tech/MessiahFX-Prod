@@ -133,9 +133,20 @@ The analytics to *judge* the run are built (the 4-week clock itself is operation
   deferred) + non-destructive compression + 90d retention on `market_snapshots` only.
   Applied + verified live. `trades` kept plain (preserves `client_order_id` idempotency).
   See docs/scale.md.
-- Remaining: multi-workspace layouts, responsive/mobile, accessibility; multi-account /
-  multi-tenant if needed; per-venue feed scaling; horizontal scaling of stateless
-  services; continuous aggregates for dashboard rollups.
+- **Scope decisions (2026-06-11):** single-account (multi-tenant dropped — not
+  managing separate books) and desktop-only (mobile dropped; accessibility scoped
+  to keyboard nav + contrast, which the terminal largely has via the ⌘K palette).
+- ~~Full stack online~~ **DONE** — RAG (qdrant + rag healthy, verified through the
+  gateway proxy) and observability (prometheus + grafana on :3002 + loki + promtail)
+  now run alongside the trading stack; 18 containers green on the 6 GiB machine
+  (~1.5 GiB steady-state). Fixed en route: qdrant healthcheck (no curl in image →
+  bash /dev/tcp probe), loki healthcheck (distroless, no probe possible → dependents
+  wait on service_started), grafana host port 3000→3002 (terminal owns 3000),
+  backtest healthcheck (no curl in image → python urllib probe), and the dev
+  terminal container's pnpm-9-vs-10 `pnpm-workspace.yaml` crash-loop.
+- Remaining (in priority order): multi-workspace layouts; keyboard-nav/contrast
+  pass; per-venue feed scaling; horizontal scaling of stateless services;
+  continuous aggregates for dashboard rollups.
 
 ---
 
