@@ -144,9 +144,24 @@ The analytics to *judge* the run are built (the 4-week clock itself is operation
   wait on service_started), grafana host port 3000→3002 (terminal owns 3000),
   backtest healthcheck (no curl in image → python urllib probe), and the dev
   terminal container's pnpm-9-vs-10 `pnpm-workspace.yaml` crash-loop.
-- Remaining (in priority order): multi-workspace layouts; keyboard-nav/contrast
-  pass; per-venue feed scaling; horizontal scaling of stateless services;
-  continuous aggregates for dashboard rollups.
+- ~~Multi-workspace layouts~~ **DONE** — named dashboard presets (trading / markets
+  / risk / quant) + per-panel visibility toggles (forks to "custom"), persisted to
+  localStorage; switcher in the dashboard header + `Workspace:` commands in ⌘K.
+- ~~Keyboard-nav / contrast pass~~ **DONE** — global `:focus-visible` rings,
+  skip-to-content link, `prefers-reduced-motion` support, aria-labels on icon-only
+  buttons, and `--text-tertiary` bumped #3d4a5c → #64748b (was ~2.1:1 contrast on
+  the surfaces — failed for the 10px labels it carries; now ~4:1).
+- ~~Per-venue feed scaling~~ **DONE** — `FEED_VENUES` venue sharding: N market-data
+  replicas with disjoint allowlists split the venues; feeds, bar writer, order-book
+  feed, health and metrics all respect the shard. ai-filter consumer names are now
+  hostname-unique so it scales as replicas; risk/executor stay single-instance by
+  design. Scaling matrix in docs/scale.md.
+- ~~Continuous aggregates~~ **DONE** — migration `006` (applied live):
+  `opportunities_funnel_daily` TimescaleDB continuous aggregate (hourly refresh,
+  real-time tail) + `GET /journal/opportunities/funnel/daily` with a direct-
+  aggregation fallback. Rollup cost stays flat as history grows.
+
+**Phase 5 is complete.**
 
 ---
 

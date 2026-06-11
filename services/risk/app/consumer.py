@@ -53,6 +53,8 @@ from . import state
 log = structlog.get_logger()
 
 _GROUP = "risk"
+# Deliberately fixed: risk checks are SERIALISED by design (see module docstring)
+# — do not scale this service horizontally.
 _CONSUMER = "risk-1"
 _BLOCK_MS = 100
 _STREAM_MAXLEN = 1000

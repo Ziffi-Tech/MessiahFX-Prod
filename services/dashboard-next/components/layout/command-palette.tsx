@@ -5,13 +5,15 @@ import { useRouter } from "next/navigation";
 import {
   LayoutDashboard, TrendingUp, Settings2, BarChart3, Shield, ScrollText,
   BookOpen, Settings, Play, Square, AlertOctagon, Search, CornerDownLeft, LineChart,
+  LayoutGrid,
 } from "lucide-react";
 import { useBotStart, useBotStop, useKillSwitch, useAuth } from "@/lib/hooks";
+import { useWorkspaceStore, WORKSPACE_NAMES } from "@/lib/stores/workspace";
 
 interface Command {
   id: string;
   label: string;
-  group: "Navigate" | "Actions";
+  group: "Navigate" | "Actions" | "Workspace";
   icon: React.ComponentType<{ size?: number }>;
   run: () => void;
   danger?: boolean;
@@ -28,6 +30,7 @@ export function CommandPalette() {
   const start = useBotStart();
   const stop = useBotStop();
   const kill = useKillSwitch();
+  const setWorkspace = useWorkspaceStore((s) => s.setWorkspace);
   const canAct = auth?.role !== "viewer";
 
   const [open, setOpen] = useState(false);
@@ -50,6 +53,16 @@ export function CommandPalette() {
       nav("/rag", "RAG Studio", BookOpen),
       nav("/settings", "Settings", Settings),
     ];
+    // Workspace switching (dashboard panel presets).
+    for (const name of WORKSPACE_NAMES) {
+      list.push({
+        id: `ws:${name}`,
+        label: `Workspace: ${name[0].toUpperCase()}${name.slice(1)}`,
+        group: "Workspace",
+        icon: LayoutGrid,
+        run: () => { setWorkspace(name); router.push("/"); },
+      });
+    }
     // Write actions are hidden for read-only (viewer) roles.
     if (canAct) {
       list.push(
@@ -62,7 +75,7 @@ export function CommandPalette() {
       );
     }
     return list;
-  }, [router, start, stop, kill, canAct]);
+  }, [router, start, stop, kill, canAct, setWorkspace]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

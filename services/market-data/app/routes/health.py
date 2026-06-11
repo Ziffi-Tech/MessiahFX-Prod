@@ -92,6 +92,11 @@ async def feed_status(request: Request) -> JSONResponse:
         else:
             configured = False
 
+        # Venue sharding: a venue outside this instance's FEED_VENUES shard is
+        # another replica's responsibility — don't fail health for it here.
+        if configured and not settings.venue_enabled(venue):
+            configured = False
+
         if configured:
             alive = heartbeat is not None
             if not alive:

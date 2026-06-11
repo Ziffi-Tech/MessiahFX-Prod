@@ -44,10 +44,41 @@ Part of `alembic upgrade head` (the `migrate` service). In dev, the migrations d
 bind-mounted (see `podman-compose.dev.yml`), so new migrations apply on
 `podman compose ... up -d migrate` without rebuilding the image.
 
-## Beyond this (future scale levers)
+## Horizontal scaling (all delivered)
 
-- Per-venue feed scaling (separate market-data replicas per exchange).
-- Horizontal scaling of the stateless services (gateway, journal, backtest) behind the
-  gateway; the risk/executor consumers stay single-instance by design (ordering).
-- Continuous aggregates for the dashboard's rollups (e.g., daily P&L) instead of
-  on-the-fly aggregation, once query volume justifies it.
+### Per-venue feed sharding — `FEED_VENUES`
+
+Run N market-data replicas, each with a disjoint venue allowlist:
+
+```yaml
+market-data-crypto:   # binance + bybit + okx + kraken
+  environment: { FEED_VENUES: "binance,bybit,okx,kraken" }
+market-data-fx:       # oanda only
+  environment: { FEED_VENUES: "oanda" }
+```
+
+Feeds, the bar writer, the order-book feed, `/health/feeds`, and the feed-health
+metrics all respect the filter — a replica neither runs nor alerts on venues
+outside its shard. Empty `FEED_VENUES` (the default) = run everything.
+
+### Service scaling matrix
+
+| Service | Scale horizontally? | Why |
+|---|---|---|
+| gateway, journal, backtest, rag, notifications | **Yes** | Stateless per request (notifications pops a shared list — disjoint by nature) |
+| ai-filter | **Yes** | Scoring is stateless per message; consumer name is hostname-unique so the group splits the stream across replicas |
+| market-data | **Shard by venue** | One WebSocket per venue — use `FEED_VENUES`, not naive replicas (duplicate feeds would double-write ticks) |
+| risk | **No — single instance** | Risk checks are serialised against shared state (position counts); parallel checks could approve past the limits |
+| executor | **No — single instance** | Order submission is intentionally serialised (two legs must not race; idempotency assumes one submitter) |
+
+### Continuous aggregates (dashboard rollups)
+
+Migration `006` adds `opportunities_funnel_daily` — a TimescaleDB continuous
+aggregate (per day × strategy: detected / ai_scored / risk_approved / executed /
+risk_rejected / expired), refreshed hourly with real-time aggregation for the
+unmaterialized tail. `GET /journal/opportunities/funnel/daily?days=N` serves it
+(falls back to direct aggregation when 006 isn't applied; the response's
+`source` field says which path served it). Rollup cost stays flat as history
+grows. The same pattern is ready for `ohlcv_bars` (hourly/daily candles) when
+needed — `trades` stays a plain table by design (idempotency), so P&L rollups
+remain query-time.

@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     OANDA_ENVIRONMENT: str = "practice"
     OANDA_INSTRUMENTS: str = "EUR_USD,GBP_USD,USD_JPY"
 
+    # ── Venue sharding (horizontal feed scaling) ──────────────────────────────
+    # Comma allowlist of venues THIS instance runs (e.g. "binance,oanda").
+    # Empty = run every configured venue (single-instance default). To shard,
+    # run N market-data replicas, each with a disjoint FEED_VENUES subset —
+    # feeds, bar writer and order-book targets all respect the filter.
+    FEED_VENUES: str = ""
+
     # Tick cache config
     TICK_CACHE_MAX_SIZE: int = 500  # Max ticks to keep per symbol in Redis
 
@@ -67,6 +74,15 @@ class Settings(BaseSettings):
     BAR_WRITER_ENABLED: bool = True
     BAR_WRITER_INTERVAL_SECONDS: int = 60  # how often to flush completed bars
     BAR_WRITER_BAR_SECONDS: int = 60       # candle width (60s = "1m" bars)
+
+    @property
+    def feed_venue_list(self) -> list[str]:
+        return [v.strip().lower() for v in self.FEED_VENUES.split(",") if v.strip()]
+
+    def venue_enabled(self, venue: str) -> bool:
+        """True when this instance should run the venue (empty allowlist = all)."""
+        allow = self.feed_venue_list
+        return not allow or venue.lower() in allow
 
     @property
     def binance_spot_list(self) -> list[str]:
@@ -110,7 +126,7 @@ class Settings(BaseSettings):
             targets.append(("kraken", s))
         for s in self.oanda_instrument_list:
             targets.append(("oanda", s))
-        return targets
+        return [(v, s) for v, s in targets if self.venue_enabled(v)]
 
     @property
     def orderbook_targets(self) -> list[tuple[str, str]]:
@@ -122,7 +138,7 @@ class Settings(BaseSettings):
                 continue
             venue, symbol = spec.split(":", 1)
             venue, symbol = venue.strip().lower(), symbol.strip()
-            if venue and symbol:
+            if venue and symbol and self.venue_enabled(venue):
                 targets.append((venue, symbol))
         return targets
 

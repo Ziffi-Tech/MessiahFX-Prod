@@ -90,6 +90,7 @@ export default function SettingsPage() {
           />
           <button
             type="button"
+            aria-label={showPass ? "Hide password" : "Show password"}
             onClick={() => setShowPass(!showPass)}
             className="absolute right-3 top-1/2 -translate-y-1/2"
             style={{ color: "var(--text-tertiary)" }}

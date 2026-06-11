@@ -774,6 +774,49 @@ async def funnel_stats(
     return d
 
 
+# Daily funnel from the continuous aggregate (migration 006). Falls back to a
+# direct GROUP BY over opportunities when the cagg doesn't exist yet, so the
+# endpoint works on databases that haven't run 006.
+_FUNNEL_DAILY_CAGG = text("""
+    SELECT day, strategy_type, detected, ai_scored, risk_approved,
+           executed, risk_rejected, expired
+    FROM opportunities_funnel_daily
+    WHERE day >= NOW() - make_interval(days => :days)
+    ORDER BY day DESC, strategy_type
+""")
+
+_FUNNEL_DAILY_DIRECT = text("""
+    SELECT
+        date_trunc('day', detected_at)                    AS day,
+        strategy_type,
+        COUNT(*)                                          AS detected,
+        COUNT(*) FILTER (WHERE ai_scored_at IS NOT NULL)  AS ai_scored,
+        COUNT(*) FILTER (WHERE risk_approved = true)      AS risk_approved,
+        COUNT(*) FILTER (WHERE executed = true)           AS executed,
+        COUNT(*) FILTER (WHERE risk_approved = false)     AS risk_rejected,
+        COUNT(*) FILTER (WHERE expired = true)            AS expired
+    FROM opportunities
+    WHERE detected_at >= NOW() - make_interval(days => :days)
+    GROUP BY 1, 2
+    ORDER BY 1 DESC, 2
+""")
+
+
+async def funnel_daily(db_engine: AsyncEngine, *, days: int = 30) -> dict:
+    """Per-day, per-strategy funnel rollup (continuous aggregate when available)."""
+    source = "continuous_aggregate"
+    try:
+        async with get_async_session(db_engine) as session:
+            rows = (await session.execute(_FUNNEL_DAILY_CAGG, {"days": days})).fetchall()
+    except Exception:
+        # View missing (migration 006 not applied) — aggregate directly.
+        source = "direct"
+        async with get_async_session(db_engine) as session:
+            rows = (await session.execute(_FUNNEL_DAILY_DIRECT, {"days": days})).fetchall()
+
+    return {"days": days, "source": source, "rows": [_row_to_dict(r) for r in rows]}
+
+
 # ── Audit log ────────────────────────────────────────────────────────────────
 
 _SELECT_AUDIT = text("""

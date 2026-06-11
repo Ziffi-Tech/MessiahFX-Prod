@@ -84,41 +84,26 @@ async def lifespan(app: FastAPI):
     # ── Launch feeds ───────────────────────────────────────────────────────────
     # Each feed runs as a background task. They start immediately but the service
     # is ready before they establish WebSocket/stream connections.
+    # FEED_VENUES (venue sharding) skips feeds outside this instance's shard, so
+    # N replicas with disjoint allowlists split the venues between them.
 
-    binance_task = asyncio.create_task(
-        binance_feed.run(settings, app.state.redis),
-        name="binance_feed",
-    )
-    binance_task.add_done_callback(_on_feed_task_done)
-    _feed_tasks.append(binance_task)
-
-    oanda_task = asyncio.create_task(
-        oanda_feed.run(settings, app.state.redis),
-        name="oanda_feed",
-    )
-    oanda_task.add_done_callback(_on_feed_task_done)
-    _feed_tasks.append(oanda_task)
-
-    bybit_task = asyncio.create_task(
-        bybit_feed.run(settings, app.state.redis),
-        name="bybit_feed",
-    )
-    bybit_task.add_done_callback(_on_feed_task_done)
-    _feed_tasks.append(bybit_task)
-
-    okx_task = asyncio.create_task(
-        okx_feed.run(settings, app.state.redis),
-        name="okx_feed",
-    )
-    okx_task.add_done_callback(_on_feed_task_done)
-    _feed_tasks.append(okx_task)
-
-    kraken_task = asyncio.create_task(
-        kraken_feed.run(settings, app.state.redis),
-        name="kraken_feed",
-    )
-    kraken_task.add_done_callback(_on_feed_task_done)
-    _feed_tasks.append(kraken_task)
+    _venue_feeds = {
+        "binance": binance_feed,
+        "oanda": oanda_feed,
+        "bybit": bybit_feed,
+        "okx": okx_feed,
+        "kraken": kraken_feed,
+    }
+    for _venue, _feed in _venue_feeds.items():
+        if not settings.venue_enabled(_venue):
+            log.info("feed.skipped_by_shard", venue=_venue, shard=settings.feed_venue_list)
+            continue
+        _task = asyncio.create_task(
+            _feed.run(settings, app.state.redis),
+            name=f"{_venue}_feed",
+        )
+        _task.add_done_callback(_on_feed_task_done)
+        _feed_tasks.append(_task)
 
     # Live bar writer — resamples the tick cache into persisted OHLCV candles.
     # Tracked alongside the feeds so it is cancelled + awaited on shutdown.
