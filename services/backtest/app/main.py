@@ -32,6 +32,8 @@ from .routes import health, backtest
 from .routes import compare
 from .routes import regime_backtest
 from .routes import ohlcv
+from .routes import walk_forward
+from .routes import volatility
 
 setup_logging(
     service_name=settings.SERVICE_NAME,
@@ -98,5 +100,7 @@ app.include_router(backtest.router,         tags=["backtest"])
 app.include_router(compare.router,          tags=["compare"])
 app.include_router(regime_backtest.router,  tags=["regime-backtest"])
 app.include_router(ohlcv.router,            tags=["ohlcv"])
+app.include_router(walk_forward.router,     tags=["walk-forward"])
+app.include_router(volatility.router,       tags=["volatility"])
 
 setup_metrics(app, service_name=settings.SERVICE_NAME)

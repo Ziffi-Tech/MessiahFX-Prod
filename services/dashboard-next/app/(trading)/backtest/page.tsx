@@ -5,6 +5,8 @@ import { useMutation } from "@tanstack/react-query";
 import { Play, BarChart3, Zap, Search } from "lucide-react";
 import { api } from "@/lib/api";
 import type { BacktestResult, MonteCarloResult, GridSearchEntry } from "@/types/api";
+import { WalkForwardPanel } from "@/components/trading/walk-forward-panel";
+import { VolatilityPanel } from "@/components/trading/volatility-panel";
 
 type Tab = "backtest" | "monte_carlo" | "optimise";
 
@@ -475,6 +477,12 @@ export default function BacktestPage() {
           )}
         </div>
       )}
+
+      {/* Walk-forward out-of-sample validation */}
+      <WalkForwardPanel />
+
+      {/* Volatility forecast + vol-aware sizing */}
+      <VolatilityPanel />
     </div>
   );
 }

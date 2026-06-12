@@ -63,6 +63,7 @@ export function Topbar() {
         {/* Command palette affordance */}
         <button
           type="button"
+          aria-label="Open command palette (Ctrl+K)"
           onClick={() => window.dispatchEvent(new Event("mezna:command-palette"))}
           className="hidden md:flex items-center gap-1.5 px-2 py-1 rounded text-[11px]"
           style={{ background: "var(--bg-surface-2)", color: "var(--text-tertiary)", border: "1px solid var(--border)" }}

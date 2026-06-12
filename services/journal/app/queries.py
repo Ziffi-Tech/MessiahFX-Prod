@@ -398,6 +398,24 @@ def cost_bps(cost: float, notional: float) -> float:
     return round(cost / notional * 10_000.0, 4) if notional > 0 else 0.0
 
 
+def align_daily_returns(rows: list[dict]) -> dict[str, list[float]]:
+    """
+    Build DATE-ALIGNED per-strategy daily realised-P&L series from daily_pnl rows.
+
+    All strategies share one sorted date axis; a strategy that didn't trade on a
+    date gets 0 there — so the series are equal-length and comparable for the
+    capital-allocation covariance.
+    """
+    dates = sorted({str(r.get("trade_date")) for r in rows})
+    index = {d: i for i, d in enumerate(dates)}
+    series: dict[str, list[float]] = {}
+    for r in rows:
+        strat = r.get("strategy_type") or "unknown"
+        series.setdefault(strat, [0.0] * len(dates))
+        series[strat][index[str(r.get("trade_date"))]] += float(r.get("realized_pnl", 0) or 0)
+    return series
+
+
 _PERF_BY_STRATEGY = text("""
     SELECT
         strategy_type,
@@ -754,6 +772,49 @@ async def funnel_stats(
     d["risk_approval_rate"] = round(risk_approved / detected, 4) if detected else 0
     d["execution_rate"] = round(executed / risk_approved, 4) if risk_approved else 0
     return d
+
+
+# Daily funnel from the continuous aggregate (migration 006). Falls back to a
+# direct GROUP BY over opportunities when the cagg doesn't exist yet, so the
+# endpoint works on databases that haven't run 006.
+_FUNNEL_DAILY_CAGG = text("""
+    SELECT day, strategy_type, detected, ai_scored, risk_approved,
+           executed, risk_rejected, expired
+    FROM opportunities_funnel_daily
+    WHERE day >= NOW() - make_interval(days => :days)
+    ORDER BY day DESC, strategy_type
+""")
+
+_FUNNEL_DAILY_DIRECT = text("""
+    SELECT
+        date_trunc('day', detected_at)                    AS day,
+        strategy_type,
+        COUNT(*)                                          AS detected,
+        COUNT(*) FILTER (WHERE ai_scored_at IS NOT NULL)  AS ai_scored,
+        COUNT(*) FILTER (WHERE risk_approved = true)      AS risk_approved,
+        COUNT(*) FILTER (WHERE executed = true)           AS executed,
+        COUNT(*) FILTER (WHERE risk_approved = false)     AS risk_rejected,
+        COUNT(*) FILTER (WHERE expired = true)            AS expired
+    FROM opportunities
+    WHERE detected_at >= NOW() - make_interval(days => :days)
+    GROUP BY 1, 2
+    ORDER BY 1 DESC, 2
+""")
+
+
+async def funnel_daily(db_engine: AsyncEngine, *, days: int = 30) -> dict:
+    """Per-day, per-strategy funnel rollup (continuous aggregate when available)."""
+    source = "continuous_aggregate"
+    try:
+        async with get_async_session(db_engine) as session:
+            rows = (await session.execute(_FUNNEL_DAILY_CAGG, {"days": days})).fetchall()
+    except Exception:
+        # View missing (migration 006 not applied) — aggregate directly.
+        source = "direct"
+        async with get_async_session(db_engine) as session:
+            rows = (await session.execute(_FUNNEL_DAILY_DIRECT, {"days": days})).fetchall()
+
+    return {"days": days, "source": source, "rows": [_row_to_dict(r) for r in rows]}
 
 
 # ── Audit log ────────────────────────────────────────────────────────────────

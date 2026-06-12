@@ -17,7 +17,9 @@
   /* Text */
   --text-primary:   #e2e8f4;
   --text-secondary: #7d8a9e;
-  --text-tertiary:  #3d4a5c;
+  /* ~4:1 on the surfaces (was #3d4a5c ≈ 2.1:1 — failed for the 10px labels it
+     carries) while staying visibly dimmer than secondary for hierarchy. */
+  --text-tertiary:  #64748b;
 
   /* Trading colours */
   --green:        #00e5a0;
@@ -66,6 +68,40 @@ body {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
+}
+
+/* ─── Keyboard accessibility ────────────────────────────────────────────── */
+/* Visible focus ring for keyboard users only (mouse clicks stay clean). */
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Skip-to-content link — hidden until it receives keyboard focus. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  z-index: 100;
+  padding: 8px 14px;
+  background: var(--bg-surface-3);
+  color: var(--text-primary);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+.skip-link:focus {
+  left: 12px;
+  top: 12px;
+}
+
+/* Respect reduced-motion preferences (flicker/flash/pulse animations). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ─── Scrollbar ─────────────────────────────────────────────────────────── */

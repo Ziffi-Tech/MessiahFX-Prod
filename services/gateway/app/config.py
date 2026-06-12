@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     BACKTEST_URL:      str = "http://mezna-backtest:8008"
     AI_FILTER_URL:     str = "http://mezna-ai-filter:8005"
     MARKET_DATA_URL:   str = "http://mezna-market-data:8001"
+    RAG_URL:           str = "http://mezna-rag:8009"
 
     # ── Session auth (defense in depth) ───────────────────────────────────────
     # Shared with the dashboard. When set, the gateway VERIFIES the operator's

@@ -27,6 +27,7 @@ Advisory-only guarantee:
 
 import asyncio
 import json
+import socket
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -42,7 +43,10 @@ from .scorer import score_opportunity
 log = structlog.get_logger()
 
 _GROUP = "ai-filter"
-_CONSUMER = "ai-filter-1"
+# Hostname-unique: scoring is stateless per message, so ai-filter CAN run as
+# multiple replicas — the consumer group splits the stream between them. A fixed
+# name would make replicas share one consumer identity (and one PEL).
+_CONSUMER = f"ai-filter-{socket.gethostname()}"
 _BLOCK_MS = 100          # Wait up to 100 ms for new messages before looping
 _STREAM_MAXLEN = 1000    # Rolling window for signals:approved
 

@@ -5,7 +5,8 @@ import type {
   StrategyConfig, RiskState, RagQuery, RagResponse,
   StrategyProfile, BacktestResult, MonteCarloResult,
   GridSearchEntry, StrategyOverview, RegimeResponse, OHLCVCandle, OrderBook,
-  ReadinessResult, PerformanceByStrategy, TcaReport,
+  ReadinessResult, PerformanceByStrategy, TcaReport, WalkForwardResult,
+  StrategyParamsResponse, ParamHistory, AllocationResult, VolatilityResult,
 } from "@/types/api";
 import type { LiveTick } from "@/lib/stores/live";
 import type { Role } from "@/lib/auth";
@@ -188,6 +189,11 @@ export const api = {
         "GET", `/journal/opportunities?limit=${limit}`
       ),
     readiness: () => req<ReadinessResult>("GET", "/journal/readiness"),
+    allocation: (days = 30, method = "risk_parity", capital = 0) =>
+      req<AllocationResult>(
+        "GET",
+        `/journal/pnl/allocation?days=${days}&method=${encodeURIComponent(method)}&capital=${capital}`,
+      ),
     byStrategy: (days = 30) =>
       req<PerformanceByStrategy>("GET", `/journal/pnl/by-strategy?days=${days}`),
     tca: (days = 30) =>
@@ -283,6 +289,30 @@ export const api = {
     }) => req<{ ranked_results: GridSearchEntry[]; best_params: Record<string, number>; combinations_run: number; warning: string }>(
       "POST", "/backtest/optimize/stat-arb", body
     ),
+    walkForwardStatArb: (body: {
+      venue?: string; spot_symbol?: string; perp_symbol?: string; interval?: string;
+      days?: number; is_candles?: number; oos_candles?: number; step_candles?: number;
+    }) => req<WalkForwardResult>("POST", "/backtest/walk-forward/stat-arb", body),
+    volatility: (params: {
+      venue?: string; symbol?: string; interval?: string; days?: number; method?: string; target_vol?: number;
+    }) => {
+      const q = new URLSearchParams(
+        Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])),
+      ).toString();
+      return req<VolatilityResult>("GET", `/backtest/volatility${q ? `?${q}` : ""}`);
+    },
+  },
+
+  // ── Parameter governance ─────────────────────────────────────────────────────
+  governance: {
+    getParams: (strategyType: string) =>
+      req<StrategyParamsResponse>("GET", `/api/v1/governance/strategy/${strategyType}`),
+    history: (strategyType: string, limit = 20) =>
+      req<ParamHistory>("GET", `/api/v1/governance/strategy/${strategyType}/history?limit=${limit}`),
+    setParams: (strategyType: string, body: { params: Record<string, unknown>; source?: string; reason?: string }) =>
+      req<Record<string, unknown>>("PUT", `/api/v1/governance/strategy/${strategyType}`, body),
+    checkDrift: (strategyType: string, referenceParams: Record<string, unknown>) =>
+      req<Record<string, unknown>>("POST", `/api/v1/governance/strategy/${strategyType}/check-drift`, { reference_params: referenceParams }),
   },
 
   // ── RAG ────────────────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@
 import { ToggleLeft, ToggleRight } from "lucide-react";
 import { useStrategies, useToggleStrategy } from "@/lib/hooks";
 import { StrategyHealth } from "@/components/trading/strategy-health";
+import { ParamGovernancePanel } from "@/components/trading/param-governance";
 import type { StrategyType } from "@/types/api";
 
 const META: Record<StrategyType, { label: string; description: string; color: string }> = {
@@ -131,6 +132,13 @@ export default function StrategiesPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Parameter governance — versioned + audited params */}
+      {strategies.length > 0 && (
+        <div className="pt-2">
+          <ParamGovernancePanel strategies={strategies.map((s) => s.strategy_type)} />
         </div>
       )}
 

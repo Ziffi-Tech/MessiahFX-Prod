@@ -1,3 +1,9 @@
+# Single-package "workspace" rooted here. The packages field is REQUIRED by
+# pnpm 9 (the dev container) when this file exists; pnpm 10 (host) accepts it
+# too and also reads ignoredBuiltDependencies below.
+packages:
+  - "."
+
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver

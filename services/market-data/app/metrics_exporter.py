@@ -34,7 +34,8 @@ def _configured_venues(settings: Settings) -> list[str]:
         venues.append("kraken")
     if settings.OANDA_API_KEY and settings.OANDA_ACCOUNT_ID and settings.oanda_instrument_list:
         venues.append("oanda")
-    return venues
+    # Venue sharding: only watch (and alert on) the venues THIS instance runs.
+    return [v for v in venues if settings.venue_enabled(v)]
 
 
 async def _notify(redis: Redis, event: str, **kwargs) -> None:

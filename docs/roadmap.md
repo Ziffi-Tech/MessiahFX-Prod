@@ -82,26 +82,86 @@ The analytics to *judge* the run are built (the 4-week clock itself is operation
 
 ## Phase 3 — Quant depth (parallelizable with Phase 2)
 
-- **vectorbt** walk-forward (now unblocked — persisted OHLCV exists): out-of-sample
-  validation, parameter stability surfaces.
-- Parameter governance: version + audit strategy params; no silent prod changes.
-- Regime detector validation; `riskfolio-lib` for multi-strategy capital allocation;
-  `arch`/GARCH for vol-aware sizing.
-- Activate the RAG service (Qdrant reserved) for strategy-knowledge grounding.
+- ~~Walk-forward (out-of-sample validation, parameter stability)~~ **DONE** —
+  delivered engine-native (`POST /backtest/walk-forward/stat-arb`): rolling IS/OOS,
+  optimise-on-IS / test-on-OOS, walk-forward-efficiency + parameter-stability +
+  robust/marginal/overfit verdict, with a Backtest-page panel. vectorbt stayed
+  deferred (see ADR 0001) — its heavy dep wasn't needed for the value.
+- ~~Parameter governance: version + audit strategy params; no silent prod changes.~~
+  **DONE** — `mezna_shared.param_governance` (canonical hash, diff, drift) + gateway
+  `/api/v1/governance/strategy/*` (get / set / history / check-drift): current params
+  in strategy_configs, append-only versioned history in audit_log attributed to the
+  verified operator. Strategies-page governance panel. See docs/parameter-governance.md.
+- ~~`riskfolio-lib` for multi-strategy capital allocation~~ **DONE** —
+  `mezna_shared.allocation` (pure Python: equal / inverse-vol / risk-parity (ERC) /
+  max-Sharpe tangency, with covariance + Gauss-Jordan inverse) + journal
+  `GET /pnl/allocation` (date-aligned per-strategy returns → weights + capital split)
+  + Allocation panel on the Performance page. riskfolio-lib stayed out (no heavy dep).
+  See docs/capital-allocation.md.
+- ~~`arch`/GARCH for vol-aware sizing~~ **DONE** — `mezna_shared.volatility`
+  (pure-Python EWMA + GARCH(1,1) via variance-targeting grid MLE) + backtest
+  `GET /volatility` + executor opt-in `VOL_TARGET_ENABLED` (relative multiplier from
+  bars) + Backtest-page panel. No `arch` dep. See docs/vol-sizing.md.
+- Regime detector validation.
+- ~~Activate the RAG service (Qdrant) for strategy-knowledge grounding.~~ **DONE** —
+  the service was fully built; wired into the platform (gateway now proxies `/rag/*`,
+  the sole missing link), so RAG Studio (ingest / query / strategy profiles) works end
+  to end. See docs/rag.md. Follow-up: ai-filter consults RAG context before scoring.
 
 ## Phase 4 — Controlled live
 
-- Provision exchange keys with **trade-only** scope (no withdrawal).
-- Capital controls: per-strategy + global notional caps, daily loss limit auto-halt.
-- Gradual rollout: one strategy, small notional → widen on evidence.
-- Incident runbooks + scheduled kill-switch drills in prod.
+- ~~Capital controls: per-strategy + global notional caps, daily loss limit auto-halt.~~
+  **DONE (code)** — risk gate now enforces `RISK_MAX_GROSS_EXPOSURE_USD`,
+  `RISK_MAX_STRATEGY_EXPOSURE_USD` (open-notional caps, queried from positions at
+  decision time) and `RISK_DAILY_LOSS_LIMIT_USD` (absolute daily-loss **auto-halt**),
+  all default OFF. 6 tests. See docs/capital-controls.md.
+- ~~Incident runbook + kill-switch drill~~ **DONE** — docs/incident-runbook.md
+  (halt-first triage + a monthly kill-switch drill).
+- **Operational (you):** provision exchange keys with **trade-only** scope (no
+  withdrawal); gradual rollout — one strategy, small per-strategy cap → widen on
+  evidence; run the kill-switch drill in prod before the first live session.
 
 ## Phase 5 — Product polish & scale
 
-- Live positions blotter (row-flash), journal filters/export, error boundaries,
-  multi-workspace layouts, responsive/mobile, accessibility.
-- Multi-account / multi-tenant if needed; per-venue feed scaling; Timescale
-  retention + compression policies; horizontal scaling of stateless services.
+- ~~Live positions blotter (row-flash), journal filters/export, error boundaries~~
+  **DONE** — positions page now shows live Current price + unrealized P&L from the
+  SSE tick store with per-cell flash (FlashCell); journal already has filters + CSV
+  export; route error boundaries (`error.tsx` + `global-error.tsx`) replace
+  white-screens with a recoverable fallback.
+- ~~Timescale retention + compression policies~~ **DONE** — migration `005` converts
+  `opportunities`/`audit_log`/`market_snapshots` to hypertables (the conversion 001
+  deferred) + non-destructive compression + 90d retention on `market_snapshots` only.
+  Applied + verified live. `trades` kept plain (preserves `client_order_id` idempotency).
+  See docs/scale.md.
+- **Scope decisions (2026-06-11):** single-account (multi-tenant dropped — not
+  managing separate books) and desktop-only (mobile dropped; accessibility scoped
+  to keyboard nav + contrast, which the terminal largely has via the ⌘K palette).
+- ~~Full stack online~~ **DONE** — RAG (qdrant + rag healthy, verified through the
+  gateway proxy) and observability (prometheus + grafana on :3002 + loki + promtail)
+  now run alongside the trading stack; 18 containers green on the 6 GiB machine
+  (~1.5 GiB steady-state). Fixed en route: qdrant healthcheck (no curl in image →
+  bash /dev/tcp probe), loki healthcheck (distroless, no probe possible → dependents
+  wait on service_started), grafana host port 3000→3002 (terminal owns 3000),
+  backtest healthcheck (no curl in image → python urllib probe), and the dev
+  terminal container's pnpm-9-vs-10 `pnpm-workspace.yaml` crash-loop.
+- ~~Multi-workspace layouts~~ **DONE** — named dashboard presets (trading / markets
+  / risk / quant) + per-panel visibility toggles (forks to "custom"), persisted to
+  localStorage; switcher in the dashboard header + `Workspace:` commands in ⌘K.
+- ~~Keyboard-nav / contrast pass~~ **DONE** — global `:focus-visible` rings,
+  skip-to-content link, `prefers-reduced-motion` support, aria-labels on icon-only
+  buttons, and `--text-tertiary` bumped #3d4a5c → #64748b (was ~2.1:1 contrast on
+  the surfaces — failed for the 10px labels it carries; now ~4:1).
+- ~~Per-venue feed scaling~~ **DONE** — `FEED_VENUES` venue sharding: N market-data
+  replicas with disjoint allowlists split the venues; feeds, bar writer, order-book
+  feed, health and metrics all respect the shard. ai-filter consumer names are now
+  hostname-unique so it scales as replicas; risk/executor stay single-instance by
+  design. Scaling matrix in docs/scale.md.
+- ~~Continuous aggregates~~ **DONE** — migration `006` (applied live):
+  `opportunities_funnel_daily` TimescaleDB continuous aggregate (hourly refresh,
+  real-time tail) + `GET /journal/opportunities/funnel/daily` with a direct-
+  aggregation fallback. Rollup cost stays flat as history grows.
+
+**Phase 5 is complete.**
 
 ---
 

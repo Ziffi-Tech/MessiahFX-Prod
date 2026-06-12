@@ -8,6 +8,8 @@ Maps URL path prefixes to upstream service URLs:
   /backtest/*    → BACKTEST_URL (backtest + Monte Carlo + optimiser)
   /ai/*          → AI_FILTER_URL (Claude AI filter, regime, digest)
   /market-data/* → MARKET_DATA_URL (tick feeds)
+  /executor/*    → EXECUTOR_URL (ledger reconciliation)
+  /rag/*         → RAG_URL (knowledge base — ingest, query, strategy profiles)
 
 The dashboard-next uses /api/gateway/{path} which the Next.js proxy
 forwards to the gateway. This route handles all intra-service requests
@@ -35,6 +37,7 @@ _UPSTREAM: dict[str, str] = {
     "ai":          settings.AI_FILTER_URL,
     "market-data": settings.MARKET_DATA_URL,
     "executor":    settings.EXECUTOR_URL,
+    "rag":         settings.RAG_URL,
 }
 
 

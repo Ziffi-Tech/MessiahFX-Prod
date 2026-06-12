@@ -259,6 +259,125 @@ export interface StrategyOverview {
   timestamp: string;
 }
 
+// ── Volatility forecast + vol-aware sizing ──────────────────────────────────
+
+export interface VolatilityResult {
+  status: string;
+  venue?: string;
+  symbol?: string;
+  interval?: string;
+  days?: number;
+  method?: string;
+  returns?: number;
+  forecast_vol_per_period?: number;
+  forecast_vol_annualized?: number;
+  periods_per_year?: number;
+  garch_params?: { omega: number; alpha: number; beta: number; loglik: number } | null;
+  target_vol_annualized?: number;
+  sizing_multiplier?: number;
+  detail?: string;
+  candles?: number;
+}
+
+// ── Capital allocation ──────────────────────────────────────────────────────
+
+export interface AllocationStrategy {
+  strategy_type: string;
+  weight: number;
+  capital: number;
+  daily_mean_pnl: number;
+  daily_vol: number;
+  risk_contribution: number | null;
+  usable: boolean;
+}
+
+export interface AllocationResult {
+  days: number;
+  method: string;
+  capital: number;
+  usable_count: number;
+  weights: Record<string, number>;
+  strategies: AllocationStrategy[];
+}
+
+// ── Parameter governance ────────────────────────────────────────────────────
+
+export interface StrategyParamsResponse {
+  strategy_type: string;
+  params: Record<string, unknown>;
+  hash: string;
+  version: number;
+  updated_by: string;
+  updated_at: string | null;
+}
+
+export interface ParamDiff {
+  added: Record<string, unknown>;
+  removed: Record<string, unknown>;
+  changed: Record<string, { old: unknown; new: unknown }>;
+}
+
+export interface ParamHistoryEntry {
+  strategy_type: string;
+  params: Record<string, unknown>;
+  hash: string;
+  version: number;
+  diff?: ParamDiff;
+  source?: string;
+  reason?: string;
+  by?: string;
+  created_at?: string;
+}
+
+export interface ParamHistory {
+  strategy_type: string;
+  count: number;
+  history: ParamHistoryEntry[];
+}
+
+// ── Walk-forward analysis (out-of-sample validation) ───────────────────────
+
+export interface WfaFold {
+  params: { window: number; entry_z: number };
+  is_sharpe: number;
+  is_trades: number;
+  oos_sharpe: number;
+  oos_net_pnl: number;
+  oos_trades: number;
+  oos_win_rate: number;
+  oos_max_drawdown_pct: number;
+  oos_start_dt: string;
+  oos_end_dt: string;
+}
+
+export interface WfaSummary {
+  folds: number;
+  verdict: string;
+  median_oos_sharpe: number | null;
+  mean_oos_sharpe: number | null;
+  mean_is_sharpe?: number | null;
+  walk_forward_efficiency: number | null;
+  positive_fold_fraction: number | null;
+  total_oos_net_pnl: number;
+  total_oos_trades: number;
+  parameter_stability: Record<string, { distinct: number; mode: number; mode_fraction: number }>;
+}
+
+export interface WalkForwardResult {
+  status: string;
+  strategy?: string;
+  symbols?: string;
+  interval?: string;
+  days?: number;
+  aligned_candles?: number;
+  windows?: number;
+  folds?: WfaFold[];
+  summary?: WfaSummary;
+  detail?: string;
+  spot_candles?: number;
+  perp_candles?: number;
+}
+
 // ── Performance review + TCA (paper validation) ────────────────────────────
 
 export interface StrategyPerformance {

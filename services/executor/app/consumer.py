@@ -61,6 +61,7 @@ from mezna_shared.audit import write_audit_log
 from mezna_shared.opportunities import mark_opportunity_executed
 from mezna_shared.order_ids import make_client_order_id
 from .idempotency import recover_result, record_result
+from . import vol_sizing
 from .adapters import OrderRequest, OrderResult
 from .adapters.registry import AdapterRegistry
 from . import db as trade_db
@@ -695,13 +696,26 @@ async def _process(
             side=leg["side"],
         )
 
+        # Vol-aware sizing (opt-in): scale the per-leg notional by a relative
+        # volatility multiplier before computing quantity (smaller in vol spikes).
+        leg_position_usd = position_usd
+        if settings.VOL_TARGET_ENABLED:
+            mult = await vol_sizing.multiplier(db_engine, leg["venue"], leg["symbol"], settings)
+            if mult != 1.0:
+                leg_position_usd = position_usd * mult
+                log.info(
+                    "executor.vol_target_applied",
+                    symbol=leg["symbol"], multiplier=round(mult, 4),
+                    base_usd=round(position_usd, 2), sized_usd=round(leg_position_usd, 2),
+                )
+
         # Position sizing from current tick
         quantity = await _calc_quantity(
             redis,
             venue=leg["venue"],
             symbol=leg["symbol"],
             side=leg["side"],
-            position_usd=position_usd,
+            position_usd=leg_position_usd,
         )
 
         if quantity is None or quantity <= 0:

@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dev override — HOT RELOAD. Host code edits reflect in the running containers
+# instantly; no rebuild.
+#
+#   podman compose -f podman-compose.yml -f podman-compose.dev.yml up -d
+#   (or: pwsh scripts/dev-up.ps1   /   make dev)
+#
+# How it works:
+#  - Each service already bind-mounts its app/ (see the base compose). Here we
+#    switch uvicorn to --reload so it actually picks changes up, and mount
+#    shared/mezna_shared onto PYTHONPATH so edits to the shared package ALSO take
+#    effect live — and so the running container uses the latest shared code even
+#    if its image was built before these modules existed (no rebuild needed).
+#  - WATCHFILES_FORCE_POLLING=true is REQUIRED on Windows/WSL2 + podman: bind-mount
+#    file events from the Windows host do NOT reach the container via inotify, so
+#    the reloader must poll. Same reason the dashboard uses WATCHPACK_POLLING.
+#  - --reload implies a single worker (fine for dev; the executor is single-worker
+#    in prod too for order serialisation).
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-pydev: &pydev
+  environment:
+    WATCHFILES_FORCE_POLLING: "true"
+    PYTHONPATH: /app            # /app/mezna_shared shadows the baked site-packages copy
+  volumes:
+    - ./shared/mezna_shared:/app/mezna_shared
+
+services:
+  # Mount the migrations dir so new migrations apply on `up migrate` without
+  # rebuilding the image (they're baked in at build time otherwise).
+  migrate:
+    volumes:
+      - ./migrations:/app/migrations
+
+  gateway:
+    <<: *pydev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]
+
+  market-data:
+    <<: *pydev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]
+
+  strategy:
+    <<: *pydev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]
+
+  risk:
+    <<: *pydev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8003", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]
+
+  executor:
+    <<: *pydev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8004", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]
+
+  ai-filter:
+    <<: *pydev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8005", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]
+
+  journal:
+    <<: *pydev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8006", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]
+
+  notifications:
+    <<: *pydev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8007", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]
+
+  backtest:
+    <<: *pydev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8008", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]
+
+  rag:
+    <<: *pydev
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8009", "--reload", "--reload-dir", "/app/app", "--reload-dir", "/app/mezna_shared"]
+
+  # Next.js terminal in dev mode (next dev + HMR). Source bind-mounted; node_modules
+  # and .next kept in anonymous volumes so the host doesn't clobber the container's.
+  dashboard-next:
+    build:
+      context: .
+      dockerfile: services/dashboard-next/Containerfile.dev
+    image: localhost/mezna-dashboard-next:dev
+    command: ["pnpm", "dev"]
+    environment:
+      NODE_ENV: development
+      WATCHPACK_POLLING: "true"        # webpack/Next file polling for WSL bind mounts
+      CHOKIDAR_USEPOLLING: "true"
+      GATEWAY_URL: http://gateway:8000
+    volumes:
+      - ./services/dashboard-next:/app
+      - /app/node_modules
+      - /app/.next

@@ -61,6 +61,20 @@ async def funnel(
     return JSONResponse(content=stats)
 
 
+@router.get("/funnel/daily")
+async def funnel_daily(
+    request: Request,
+    days: int = Query(30, ge=1, le=365),
+) -> JSONResponse:
+    """
+    Per-day, per-strategy funnel rollup — served from the TimescaleDB continuous
+    aggregate (migration 006) when present, so cost stays flat as history grows;
+    falls back to direct aggregation otherwise (response carries `source`).
+    """
+    data = await queries.funnel_daily(request.app.state.db_engine, days=days)
+    return JSONResponse(content=data)
+
+
 @router.get("/{opportunity_id}")
 async def get_opportunity(request: Request, opportunity_id: str) -> JSONResponse:
     """

@@ -8,8 +8,10 @@ Check order (highest priority first):
   1. kill_switch         — risk:halt flag; blocks ALL activity immediately
   2. strategy_enabled    — dashboard toggle; operator can disable per-strategy
   3. strategy_cooldown   — risk:cooldown:{strategy} TTL key (set after loss streak)
-  4. daily_drawdown      — total loss today >= limit → REJECT + AUTO-HALT
+  4. daily_drawdown      — drawdown % today >= limit → REJECT + AUTO-HALT
+  4b. daily_loss_limit   — absolute daily loss USD >= limit → REJECT + AUTO-HALT (Phase 4; 0=off)
   5. max_open_positions  — too many simultaneous positions → REJECT
+  5b. exposure_caps      — gross / per-strategy open notional over cap → REJECT (Phase 4; 0=off)
   6. consecutive_losses  — loss streak >= limit → REJECT + trigger cooldown
   7. net_edge_positive   — final sanity check; should never fail if strategy is correct
 
@@ -45,6 +47,10 @@ def run_checks(
     strategy_state: dict[str, str],
     on_cooldown: bool,
     settings: Settings,
+    *,
+    gross_exposure_usd: float = 0.0,
+    strategy_exposure_usd: float = 0.0,
+    new_notional_usd: float = 0.0,
 ) -> CheckResult:
     """
     Run all pre-trade checks in priority order.
@@ -100,6 +106,18 @@ def run_checks(
         )
     passed.append("daily_drawdown")
 
+    # ── 4b. Absolute daily-loss limit (Phase 4; 0 = disabled) → AUTO-HALT ───────
+    if settings.RISK_DAILY_LOSS_LIMIT_USD > 0:
+        daily_pnl_usd = float(risk_hash.get("daily_pnl_usd", 0) or 0)
+        if daily_pnl_usd <= -settings.RISK_DAILY_LOSS_LIMIT_USD:
+            return CheckResult(
+                approved=False,
+                rejection_reason=f"daily_loss_limit_usd:{daily_pnl_usd:.2f}",
+                checks_failed=["daily_loss_limit"],
+                auto_halt=True,
+            )
+    passed.append("daily_loss_limit")
+
     # ── 5. Max open positions ──────────────────────────────────────────────────
     open_positions = int(risk_hash.get("open_position_count", 0))
     if open_positions >= settings.RISK_MAX_OPEN_POSITIONS:
@@ -109,6 +127,28 @@ def run_checks(
             checks_failed=["max_open_positions"],
         )
     passed.append("max_open_positions")
+
+    # ── 5b. Notional exposure caps (Phase 4; 0 = disabled) ─────────────────────
+    # Reject if filling this order would push OPEN notional over a hard cap.
+    if settings.RISK_MAX_GROSS_EXPOSURE_USD > 0:
+        projected = gross_exposure_usd + new_notional_usd
+        if projected > settings.RISK_MAX_GROSS_EXPOSURE_USD:
+            return CheckResult(
+                approved=False,
+                rejection_reason=f"gross_exposure_cap:{projected:.0f}>{settings.RISK_MAX_GROSS_EXPOSURE_USD:.0f}",
+                checks_failed=["gross_exposure"],
+            )
+    passed.append("gross_exposure")
+
+    if settings.RISK_MAX_STRATEGY_EXPOSURE_USD > 0:
+        projected_s = strategy_exposure_usd + new_notional_usd
+        if projected_s > settings.RISK_MAX_STRATEGY_EXPOSURE_USD:
+            return CheckResult(
+                approved=False,
+                rejection_reason=f"strategy_exposure_cap:{projected_s:.0f}>{settings.RISK_MAX_STRATEGY_EXPOSURE_USD:.0f}",
+                checks_failed=["strategy_exposure"],
+            )
+    passed.append("strategy_exposure")
 
     # ── 6. Consecutive losses ──────────────────────────────────────────────────
     consecutive_losses = int(risk_hash.get("consecutive_losses", 0))
