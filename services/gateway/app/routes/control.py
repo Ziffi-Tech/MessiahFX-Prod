@@ -122,7 +122,7 @@ async def activate_kill_switch(
         await session.execute(
             text("""
                 INSERT INTO audit_log (event_type, service, payload, metadata, created_at)
-                VALUES (:event_type, :service, :payload::jsonb, :metadata::jsonb, :created_at)
+                VALUES (:event_type, :service, CAST(:payload AS jsonb), CAST(:metadata AS jsonb), :created_at)
             """),
             {
                 "event_type": "kill_switch.activated",
@@ -197,7 +197,7 @@ async def reset_kill_switch(
         await session.execute(
             text("""
                 INSERT INTO audit_log (event_type, service, payload, metadata, created_at)
-                VALUES (:event_type, :service, :payload::jsonb, :metadata::jsonb, :created_at)
+                VALUES (:event_type, :service, CAST(:payload AS jsonb), CAST(:metadata AS jsonb), :created_at)
             """),
             {
                 "event_type": "kill_switch.reset",
@@ -274,7 +274,7 @@ async def toggle_strategy(
         await session.execute(
             text("""
                 INSERT INTO audit_log (event_type, service, payload, metadata, created_at)
-                VALUES ('strategy.toggled', 'gateway', :payload::jsonb, '{}'::jsonb, :created_at)
+                VALUES ('strategy.toggled', 'gateway', CAST(:payload AS jsonb), '{}'::jsonb, :created_at)
             """),
             {
                 "payload": json.dumps({
@@ -366,7 +366,7 @@ async def bot_start(
         await session.execute(
             text("""
                 INSERT INTO audit_log (event_type, service, payload, metadata, created_at)
-                VALUES ('bot.started', 'gateway', :payload::jsonb, '{}'::jsonb, :created_at)
+                VALUES ('bot.started', 'gateway', CAST(:payload AS jsonb), '{}'::jsonb, :created_at)
             """),
             {
                 "payload": json.dumps({
@@ -442,7 +442,7 @@ async def bot_stop(
         await session.execute(
             text("""
                 INSERT INTO audit_log (event_type, service, payload, metadata, created_at)
-                VALUES ('bot.stopped', 'gateway', :payload::jsonb, '{}'::jsonb, :created_at)
+                VALUES ('bot.stopped', 'gateway', CAST(:payload AS jsonb), '{}'::jsonb, :created_at)
             """),
             {
                 "payload": json.dumps({
@@ -530,7 +530,7 @@ async def revoke_sessions(request: Request, body: RevokeSessionsRequest) -> dict
         await session.execute(
             text("""
                 INSERT INTO audit_log (event_type, service, payload, metadata, created_at)
-                VALUES ('sessions.revoked', 'gateway', :payload::jsonb, '{}'::jsonb, :created_at)
+                VALUES ('sessions.revoked', 'gateway', CAST(:payload AS jsonb), '{}'::jsonb, :created_at)
             """),
             {
                 "payload": json.dumps({"target": target, "by": actor}),

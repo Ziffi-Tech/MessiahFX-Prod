@@ -99,7 +99,7 @@ async def set_params(strategy_type: str, body: SetParamsRequest, request: Reques
         await session.execute(
             text("""
                 UPDATE strategy_configs
-                SET params = :params::jsonb, updated_at = now(), updated_by = :by
+                SET params = CAST(:params AS jsonb), updated_at = now(), updated_by = :by
                 WHERE strategy_type = :st
             """),
             {"params": json.dumps(new), "by": actor, "st": strategy_type},
@@ -107,7 +107,7 @@ async def set_params(strategy_type: str, body: SetParamsRequest, request: Reques
         await session.execute(
             text("""
                 INSERT INTO audit_log (event_type, service, payload, metadata, created_at)
-                VALUES ('strategy.params_changed', 'gateway', :payload::jsonb, '{}'::jsonb, now())
+                VALUES ('strategy.params_changed', 'gateway', CAST(:payload AS jsonb), '{}'::jsonb, now())
             """),
             {"payload": json.dumps({
                 "strategy_type": strategy_type,
